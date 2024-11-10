@@ -1,4 +1,4 @@
-#include"heaher.h"
+#include"header.h"
 
 CommandType parseCommand(const char *cmd)
 {
@@ -36,60 +36,31 @@ void printUsage()
 
 void processCommand(Node *root)
 {
-    char input[MAX_COMMAND_LENGTH];
-    char command[MAX_COMMAND_LENGTH];
     char path[MAX_PATH_LENGTH];
     char buffer[MAX_CONTENT_LENGTH];
     char secondPath[MAX_PATH_LENGTH];
     char typeStr[5];
     struct stat metadata;
-
+    int ch;
     while (1)
     {
         printf("\nEnter command and path (or 'EXIT' to quit): ");
 
         // Read entire line of input
-        if (fgets(input, sizeof(input), stdin) == NULL)
+        char Command[1024];
+        if (scanf("%s",Command)!=1)
         {
             printf("Error reading input. Exiting...\n");
             break;
         }
 
-        // Remove trailing newline
-        size_t len = strlen(input);
-        if (len > 0 && input[len - 1] == '\n')
-        {
-            input[len - 1] = '\0';
-            len--;
-        }
-
-        // Check for empty input
-        if (len == 0)
-        {
-            printf("Empty input. Please enter a command.\n");
-            printUsage();
-            continue;
-        }
-
-        // Handle EXIT command
-        if (strcasecmp(input, "EXIT") == 0)
+        if (strcmp(Command, "EXIT") == 0)
         {
             printf("Exiting...\n");
             break;
         }
 
-        // Parse command
-        char *tok = strtok(input, " ");
-        if (!tok)
-        {
-            printf("Invalid input format. Expected: COMMAND PATH\n");
-            printUsage();
-            continue;
-        }
-        strncpy(command, tok, sizeof(command) - 1);
-        command[sizeof(command) - 1] = '\0';
-
-        CommandType cmd = parseCommand(command);
+        CommandType cmd = parseCommand(Command);
 
         // Handle different command types
         switch (cmd)
@@ -99,16 +70,11 @@ void processCommand(Node *root)
         case CMD_META:
         case CMD_STREAM:
             // Get path for basic commands
-            tok = strtok(NULL, " ");
-            if (!tok)
-            {
-                printf("Error: Path is required\n");
-                continue;
-            }
-            strncpy(path, tok, sizeof(path) - 1);
+            scanf("%s", path);
+            
+            while ((ch = getchar()) != '\n' && ch != EOF)
+                ;
             path[sizeof(path) - 1] = '\0';
-
-            // Validate path
             Node *targetNode = searchPath(root, path);
             if (!targetNode)
             {
@@ -116,7 +82,6 @@ void processCommand(Node *root)
                 continue;
             }
 
-            // Process basic commands
             if (cmd == CMD_READ)
             {
                 ssize_t bytes = readFile(targetNode, buffer, sizeof(buffer) - 1);
@@ -131,9 +96,9 @@ void processCommand(Node *root)
                 printf("Enter content to write (max %zu chars, press Enter when done):\n",
                        sizeof(buffer) - 1);
 
-                if (fgets(buffer, sizeof(buffer), stdin) != NULL)
+                if (fgets (buffer, sizeof(buffer), stdin) != NULL)
                 {
-                    len = strlen(buffer);
+                    int len = strlen(buffer);
                     if (len > 0 && buffer[len - 1] == '\n')
                     {
                         buffer[len - 1] = '\0';
@@ -184,24 +149,11 @@ void processCommand(Node *root)
             break;
 
         case CMD_CREATE:
-            // Get type (FILE or DIR)
-            tok = strtok(NULL, " ");
-            if (!tok)
-            {
-                printf("Error: Specify FILE or DIR\n");
-                break;
-            }
-            strncpy(typeStr, tok, sizeof(typeStr) - 1);
-            typeStr[sizeof(typeStr) - 1] = '\0';
 
-            // Get path
-            tok = strtok(NULL, "");
-            if (!tok)
-            {
-                printf("Error: Specify path\n");
-                break;
-            }
-            strncpy(path, tok, sizeof(path) - 1);
+            scanf("%s %s",typeStr,path);
+            while ((ch = getchar()) != '\n' && ch != EOF)
+                ;
+            typeStr[sizeof(typeStr) - 1] = '\0';
             path[sizeof(path) - 1] = '\0';
 
             // Extract parent path and name
@@ -233,25 +185,11 @@ void processCommand(Node *root)
 
         case CMD_COPY:
             // Get source path
-            tok = strtok(NULL, " ");
-            if (!tok)
-            {
-                printf("Error: Specify source path\n");
-                break;
-            }
-            strncpy(path, tok, sizeof(path) - 1);
+            scanf("%s %s",path,secondPath);
+            while ((ch = getchar()) != '\n' && ch != EOF)
+                ;
             path[sizeof(path) - 1] = '\0';
-
-            // Get destination path
-            tok = strtok(NULL, "");
-            if (!tok)
-            {
-                printf("Error: Specify destination path\n");
-                break;
-            }
-            strncpy(secondPath, tok, sizeof(secondPath) - 1);
             secondPath[sizeof(secondPath) - 1] = '\0';
-
             Node *sourceNode = searchPath(root, path);
             if (!sourceNode)
             {
@@ -283,13 +221,9 @@ void processCommand(Node *root)
             break;
 
         case CMD_DELETE:
-            tok = strtok(NULL, "");
-            if (!tok)
-            {
-                printf("Error: Specify path\n");
-                break;
-            }
-            strncpy(path, tok, sizeof(path) - 1);
+            scanf("%s",path);
+            while ((ch = getchar()) != '\n' && ch != EOF)
+                ;
             path[sizeof(path) - 1] = '\0';
 
             Node *nodeToDelete = searchPath(root, path);
@@ -306,7 +240,9 @@ void processCommand(Node *root)
             break;
 
         case CMD_UNKNOWN:
-            printf("Unknown command: %s\n", command);
+            while ((ch = getchar()) != '\n' && ch != EOF)
+                ;
+            printf("Unknown command: %s\n", Command);
             printUsage();
             break;
         }

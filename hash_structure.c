@@ -1,4 +1,4 @@
-#include"heaher.h"
+#include"header.h"
 
 // Hash function for strings
 unsigned int hash(const char *str)

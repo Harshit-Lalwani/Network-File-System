@@ -96,7 +96,40 @@ int sendServerInfo(int sock, const char *ip, int nm_port, int client_port, Node 
     return sendNodeChain(sock, root);
 }
 
+void *handleClient(void *arg)
+{
+    struct ClientData *data = (struct ClientData *)arg;
+    int client_socket = data->socket;
+    Node *root = data->root;
+    char buffer[1024];
 
+    while (1)
+    {
+        memset(buffer, 0, sizeof(buffer));
+        ssize_t bytes_received = recv(client_socket, buffer, sizeof(buffer) - 1, 0);
+        // send(client_socket, "Received\n", strlen("Received\n"), 0);
+        if (bytes_received <= 0)
+        {
+            printf("Client disconnected\n");
+            break;
+        }
+
+        // Check if client wants to exit
+        if (strncasecmp(buffer, "exit", 4) == 0)
+        {
+            printf("Client requested to exit\n");
+            break;
+        }
+        processCommand_user(data->root,buffer,data->socket);
+        // Placeholder response
+        // const char *response = "Request received and processed\n";
+        // send(client_socket, response, strlen(response), 0);
+    }
+
+    close(client_socket);
+    free(data);
+    pthread_exit(NULL);
+}
 
 // Main function
 int main()
@@ -106,23 +139,23 @@ int main()
 
     // Start traversal from the root directory
     traverseAndAdd(root, "/home");
-
-    int client_sock1;
-    struct sockaddr_in serv_addr;
+    int naming_server_sock;
+    struct sockaddr_in naming_naming_serv_addr;
+    struct sockaddr_in naming_serv_addr;
 
     // Creating a socket
-    client_sock1 = socket(AF_INET, SOCK_STREAM, 0);
-    if (client_sock1 < 0)
+    naming_server_sock = socket(AF_INET, SOCK_STREAM, 0);
+    if (naming_server_sock < 0)
     {
         perror("Socket creation failed");
         exit(EXIT_FAILURE);
     }
 
     // Defining server address
-    serv_addr.sin_family = AF_INET;
-    serv_addr.sin_port = htons(PORT);
+    naming_serv_addr.sin_family = AF_INET;
+    naming_serv_addr.sin_port = htons(8080);
 
-    if (inet_pton(AF_INET, "127.0.0.1", &serv_addr.sin_addr) <= 0)
+    if (inet_pton(AF_INET, "127.0.0.1", &naming_serv_addr.sin_addr) <= 0)
     {
         perror("Invalid address or address not supported");
         exit(EXIT_FAILURE);
@@ -131,7 +164,7 @@ int main()
     // Connecting to the server
     while (1)
     {
-        if (connect(client_sock1, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) < 0)
+        if (connect(naming_server_sock, (struct sockaddr *)&naming_serv_addr, sizeof(naming_serv_addr)) < 0)
         {
             perror("Connection failed");
             return 0;
@@ -144,7 +177,7 @@ int main()
     }
 
     // Prepare and send server information
-    if (sendServerInfo(client_sock1, "127.0.0.1", PORT, PORT + 1, root) < 0)
+    if (sendServerInfo(naming_server_sock, "127.0.0.1", PORT, PORT + 1, root) < 0)
     {
         printf("Failed to send server information\n");
     }
@@ -152,7 +185,80 @@ int main()
     {
         printf("Successfully registered with naming server\n");
     }
-    printUsage();
+    int storage_server_sock;
+    struct sockaddr_in storage_serv_addr;
+
+    storage_server_sock = socket(AF_INET, SOCK_STREAM, 0);
+    if (storage_server_sock < 0)
+    {
+        perror("Socket creation failed");
+        exit(EXIT_FAILURE);
+    }
+
+    storage_serv_addr.sin_family = AF_INET;
+    storage_serv_addr.sin_addr.s_addr = INADDR_ANY;
+    storage_serv_addr.sin_port = htons(PORT + 1); // Use different port for client connections
+
+    // Enable address reuse
+    int opt = 1;
+    if (setsockopt(storage_server_sock, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)) < 0)
+    {
+        perror("setsockopt failed");
+        exit(EXIT_FAILURE);
+    }
+
+    if (bind(storage_server_sock, (struct sockaddr *)&storage_serv_addr, sizeof(storage_serv_addr)) < 0)
+    {
+        perror("Bind failed");
+        exit(EXIT_FAILURE);
+    }
+
+    if (listen(storage_server_sock, 10) < 0)
+    {
+        perror("Listen failed");
+        exit(EXIT_FAILURE);
+    }
+
+    printf("Storage server is listening for client connections on port %d...\n", PORT + 1);
+
+    // Main loop to accept client connections
+    while (1)
+    {
+        struct sockaddr_in client_addr;
+        socklen_t addr_len = sizeof(client_addr);
+
+        int client_socket = accept(storage_server_sock, (struct sockaddr *)&client_addr, &addr_len);
+        if (client_socket < 0)
+        {
+            perror("Accept failed");
+            continue;
+        }
+
+        // Create client data structure
+        struct ClientData *client_data = malloc(sizeof(struct ClientData));
+        client_data->socket = client_socket;
+        client_data->root = root;
+
+        // Create thread for new client
+        pthread_t thread_id;
+        if (pthread_create(&thread_id, NULL, handleClient, (void *)client_data) != 0)
+        {
+            perror("Failed to create thread");
+            close(client_socket);
+            free(client_data);
+            continue;
+        }
+
+        // Detach thread to allow it to clean up automatically when it's done
+        pthread_detach(thread_id);
+
+        printf("New client connected. Assigned to thread %lu\n", (unsigned long)thread_id);
+    }
+
+    // Cleanup (this part won't be reached in this implementation)
+    freeNode(root);
+    close(storage_server_sock);
+    // printUsage();
 
     // Cleanup
     freeNode(root);

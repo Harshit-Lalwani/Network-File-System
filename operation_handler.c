@@ -1,4 +1,4 @@
-#include"header.h"
+#include "header.h"
 
 CommandType parseCommand(const char *cmd)
 {
@@ -34,217 +34,388 @@ void printUsage()
     printf("EXIT                           - Exit the program\n");
 }
 
-void processCommand(Node *root)
+ssize_t readFileChunk(Node *node, char *buffer, size_t size, off_t offset)
+{
+    int fd = open(node->dataLocation, O_RDONLY);
+    if (fd < 0)
+        return -1;
+
+    lseek(fd, offset, SEEK_SET);
+    ssize_t bytes = read(fd, buffer, size);
+    close(fd);
+
+    return bytes;
+}
+
+// Helper function to write file in chunks
+ssize_t writeFileChunk(Node *node, const char *buffer, size_t size, off_t offset)
+{
+    int fd = open(node->dataLocation, O_WRONLY);
+    if (fd < 0)
+        return -1;
+
+    lseek(fd, offset, SEEK_SET);
+    ssize_t bytes = write(fd, buffer, size);
+    close(fd);
+
+    return bytes;
+}
+
+int min(int a,int b)
+{
+    if(a<b)
+    return a;
+    return b;
+}
+
+void processCommand_user(Node *root, char *input, int client_socket)
+{
+    char path[MAX_PATH_LENGTH];
+    char buffer[100001];
+    char secondPath[MAX_PATH_LENGTH];
+    char typeStr[5];
+    struct stat metadata;
+    char command[20];
+    char response[1024];
+
+    // Clear any leading/trailing whitespace
+    char *cmd_start = input;
+    while (*cmd_start == ' ')
+        cmd_start++;
+
+    // Check for empty command
+    if (strlen(cmd_start) == 0)
+    {
+        send(client_socket, "Error: Empty command\n", strlen("Error: Empty command\n"), 0);
+        return;
+    }
+
+    // Parse the first word as command
+    if (sscanf(cmd_start, "%s", command) != 1)
+    {
+        send(client_socket, "Error reading command\n", strlen("Error reading command\n"), 0);
+        return;
+    }
+
+    // Move pointer past command
+    cmd_start += strlen(command);
+    while (*cmd_start == ' ')
+        cmd_start++;
+
+    if (strcmp(command, "EXIT") == 0)
+    {
+        send(client_socket, "Exiting...\n", strlen("Exiting...\n"), 0);
+        return;
+    }
+
+    CommandType cmd = parseCommand(command);
+
+    // Handle different command types
+    switch (cmd)
+    {
+    case CMD_READ:
+    case CMD_WRITE:
+    case CMD_META:
+    case CMD_STREAM:
+        if (sscanf(cmd_start, "%s", path) != 1)
+        {
+            send(client_socket, "Error: Path required\n", strlen("Error: Path required\n"), 0);
+            return;
+        }
+
+        Node *targetNode = searchPath(root, path);
+        if (!targetNode)
+        {
+            snprintf(response, sizeof(response), "Path not found\n");
+            send(client_socket, response, strlen(response), 0);
+            return;
+        }
+
+        if (cmd == CMD_READ)
+        {
+            // Read file in chunks and send directly to client
+            ssize_t bytes;
+            off_t offset = 0;
+
+            // First send file size
+            struct stat st;
+            if (getFileMetadata(targetNode, &st) == 0)
+            {
+                snprintf(response, sizeof(response), "FILE_SIZE:%ld\n", st.st_size);
+                send(client_socket, response, strlen(response), 0);
+                recv(client_socket, buffer, sizeof(buffer), 0);
+            }
+            memset(buffer, 0, sizeof(buffer));
+
+            while ((bytes = readFileChunk(targetNode, buffer, sizeof(buffer), offset)) > 0)
+            {
+                printf("%s\n",buffer);
+                send(client_socket, buffer, bytes, 0);
+                recv(client_socket, buffer, sizeof(buffer), 0);
+                offset += bytes;
+                memset(buffer, 0, sizeof(buffer));
+            }
+
+            // Send end marker
+            send(client_socket, "END_OF_FILE\n", strlen("END_OF_FILE\n"), 0);
+            recv(client_socket, buffer, sizeof(buffer), 0);
+        }
+        else if (cmd == CMD_WRITE)
+        {
+            send(client_socket, "Error: Invalid file size format\n", strlen("Error: Invalid file size format\n"), 0);
+
+            // First receive file size from client
+            memset(buffer, 0, sizeof(buffer));
+            recv(client_socket, buffer, sizeof(buffer), 0);
+
+            long fileSize;
+            if (sscanf(buffer, "FILE_SIZE:%ld", &fileSize) != 1)
+            {
+                send(client_socket, "Error: Invalid file size format\n",
+                     strlen("Error: Invalid file size format\n"), 0);
+                return;
+            }
+
+            // Send acknowledgment
+            send(client_socket, "READY_TO_RECEIVE\n", strlen("READY_TO_RECEIVE\n"), 0);
+
+            // Receive file content in chunks
+            long totalReceived = 0;
+            while (totalReceived < fileSize)
+            {
+                memset(buffer, 0, sizeof(buffer));
+                ssize_t bytesReceived = recv(client_socket, buffer,
+                                             min(sizeof(buffer), fileSize - totalReceived), 0);
+
+                if (bytesReceived <= 0)
+                {
+                    send(client_socket, "Error receiving file data\n",
+                         strlen("Error receiving file data\n"), 0);
+                    return;
+                }
+
+                if (writeFileChunk(targetNode, buffer, bytesReceived, totalReceived) != bytesReceived)
+                {
+                    send(client_socket, "Error writing to file\n",
+                         strlen("Error writing to file\n"), 0);
+                    return;
+                }
+                totalReceived += bytesReceived;
+            }
+
+            snprintf(response, sizeof(response), "Successfully wrote %ld bytes\n", totalReceived);
+            send(client_socket, response, strlen(response), 0);
+        }
+        else if (cmd == CMD_META)
+        {
+            if (getFileMetadata(targetNode, &metadata) == 0)
+            {
+                snprintf(response, sizeof(response),
+                         "File Metadata:\nName: %s\nType: %s\nSize: %ld bytes\n"
+                         "Permissions: %o\nLast access: %sLast modification: %s\n",
+                         targetNode->name,
+                         targetNode->type == FILE_NODE ? "File" : "Directory",
+                         metadata.st_size,
+                         metadata.st_mode & 0777,
+                         ctime(&metadata.st_atime),
+                         ctime(&metadata.st_mtime));
+                send(client_socket, response, strlen(response), 0);
+            }
+            else
+            {
+                send(client_socket, "Error getting metadata\n",
+                     strlen("Error getting metadata\n"), 0);
+            }
+        }
+        else if (cmd == CMD_STREAM)
+        {
+            off_t offset = 0;
+            int chunks = 0;
+            ssize_t bytes;
+
+            send(client_socket, "START_STREAM\n", strlen("START_STREAM\n"), 0);
+
+            while ((bytes = streamAudioFile(targetNode, buffer, CHUNK_SIZE, offset)) > 0)
+            {
+                if (send(client_socket, buffer, bytes, 0) != bytes)
+                {
+                    send(client_socket, "Error streaming data\n",
+                         strlen("Error streaming data\n"), 0);
+                    break;
+                }
+                recv(client_socket, buffer, sizeof(buffer), 0);
+                memset(buffer,0,sizeof(buffer));
+                offset += bytes;
+                chunks++;
+                usleep(100000); // 100ms delay
+
+                // if (chunks >= 5)
+                // {
+                //     send(client_socket, "Stream demo limited to 5 chunks\n",
+                //          strlen("Stream demo limited to 5 chunks\n"), 0);
+                //     break;
+                // }
+            }
+
+            send(client_socket, "END_STREAM\n", strlen("END_STREAM\n"), 0);
+            recv(client_socket, buffer, sizeof(buffer), 0);
+        }
+        break;
+    case CMD_UNKNOWN:
+        send(client_socket, "Unknown command: %s\nUsage: READ|WRITE|META|STREAM <args>\n", strlen("Unknown command: %s\nUsage: READ|WRITE|META|STREAM <args>\n"), 0);
+        break;
+    }
+}
+
+void processCommand_namingServer(Node *root, char *input, int client_socket)
 {
     char path[MAX_PATH_LENGTH];
     char buffer[MAX_CONTENT_LENGTH];
     char secondPath[MAX_PATH_LENGTH];
     char typeStr[5];
     struct stat metadata;
-    int ch;
-    while (1)
+    char command[20];
+    char response[1024];
+
+    // Clear any leading/trailing whitespace
+    char *cmd_start = input;
+    while (*cmd_start == ' ')
+        cmd_start++;
+
+    // Check for empty command
+    if (strlen(cmd_start) == 0)
     {
-        printf("\nEnter command and path (or 'EXIT' to quit): ");
+        send(client_socket, "Error: Empty command\n", strlen("Error: Empty command\n"), 0);
+        return;
+    }
 
-        // Read entire line of input
-        char Command[1024];
-        if (scanf("%s",Command)!=1)
+    // Parse the first word as command
+    if (sscanf(cmd_start, "%s", command) != 1)
+    {
+        send(client_socket, "Error reading command\n", strlen("Error reading command\n"), 0);
+        return;
+    }
+
+    // Move pointer past command
+    cmd_start += strlen(command);
+    while (*cmd_start == ' ')
+        cmd_start++;
+
+    if (strcmp(command, "EXIT") == 0)
+    {
+        send(client_socket, "Exiting...\n", strlen("Exiting...\n"), 0);
+        return;
+    }
+
+    CommandType cmd = parseCommand(command);
+
+    // Handle different command types
+    switch (cmd)
+    {
+    case CMD_CREATE:
+        if (sscanf(cmd_start, "%s %s", typeStr, path) != 2)
         {
-            printf("Error reading input. Exiting...\n");
-            break;
+            snprintf(response, response_size, "Error: Type and path required");
+            return;
         }
 
-        if (strcmp(Command, "EXIT") == 0)
+        char *lastSlash = strrchr(path, '/');
+        if (!lastSlash)
         {
-            printf("Exiting...\n");
-            break;
+            snprintf(response, response_size, "Error: Invalid path format");
+            return;
         }
 
-        CommandType cmd = parseCommand(Command);
+        *lastSlash = '\0';
+        char *name = lastSlash + 1;
+        Node *parentDir = searchPath(root, path);
+        *lastSlash = '/';
 
-        // Handle different command types
-        switch (cmd)
+        if (!parentDir)
         {
-        case CMD_READ:
-        case CMD_WRITE:
-        case CMD_META:
-        case CMD_STREAM:
-            // Get path for basic commands
-            scanf("%s", path);
-            
-            while ((ch = getchar()) != '\n' && ch != EOF)
-                ;
-            path[sizeof(path) - 1] = '\0';
-            Node *targetNode = searchPath(root, path);
-            if (!targetNode)
-            {
-                printf("Path not found: %s\n", path);
-                continue;
-            }
-
-            if (cmd == CMD_READ)
-            {
-                ssize_t bytes = readFile(targetNode, buffer, sizeof(buffer) - 1);
-                if (bytes > 0)
-                {
-                    buffer[bytes] = '\0';
-                    printf("\n--- File Contents ---\n%s\n------------------\n", buffer);
-                }
-            }
-            else if (cmd == CMD_WRITE)
-            {
-                printf("Enter content to write (max %zu chars, press Enter when done):\n",
-                       sizeof(buffer) - 1);
-
-                if (fgets (buffer, sizeof(buffer), stdin) != NULL)
-                {
-                    int len = strlen(buffer);
-                    if (len > 0 && buffer[len - 1] == '\n')
-                    {
-                        buffer[len - 1] = '\0';
-                        len--;
-                    }
-
-                    ssize_t bytes = writeFile(targetNode, buffer, len);
-                    if (bytes > 0)
-                    {
-                        printf("Successfully wrote %zd bytes\n", bytes);
-                    }
-                }
-            }
-            else if (cmd == CMD_META)
-            {
-                if (getFileMetadata(targetNode, &metadata) == 0)
-                {
-                    printf("\n--- File Metadata ---\n");
-                    printf("Name: %s\n", targetNode->name);
-                    printf("Type: %s\n", targetNode->type == FILE_NODE ? "File" : "Directory");
-                    printf("Size: %ld bytes\n", metadata.st_size);
-                    printf("Permissions: %o\n", metadata.st_mode & 0777);
-                    printf("Last access: %s", ctime(&metadata.st_atime));
-                    printf("Last modification: %s", ctime(&metadata.st_mtime));
-                    printf("------------------\n");
-                }
-            }
-            else if (cmd == CMD_STREAM)
-            {
-                printf("\nStreaming audio file: %s\n", targetNode->name);
-                off_t offset = 0;
-                ssize_t bytes;
-                int chunks = 0;
-
-                while ((bytes = streamAudioFile(targetNode, buffer, CHUNK_SIZE, offset)) > 0)
-                {
-                    printf("Chunk %d: Streamed %zd bytes from offset %ld\n",
-                           ++chunks, bytes, offset);
-                    offset += bytes;
-
-                    if (chunks >= 5)
-                    {
-                        printf("Demo stream limited to 5 chunks...\n");
-                        break;
-                    }
-                }
-            }
-            break;
-
-        case CMD_CREATE:
-
-            scanf("%s %s",typeStr,path);
-            while ((ch = getchar()) != '\n' && ch != EOF)
-                ;
-            typeStr[sizeof(typeStr) - 1] = '\0';
-            path[sizeof(path) - 1] = '\0';
-
-            // Extract parent path and name
-            char *lastSlash = strrchr(path, '/');
-            if (!lastSlash)
-            {
-                printf("Error: Invalid path format\n");
-                break;
-            }
-
-            *lastSlash = '\0';
-            char *name = lastSlash + 1;
-            Node *parentDir = searchPath(root, path);
-            *lastSlash = '/';
-
-            if (!parentDir)
-            {
-                printf("Error: Parent directory not found\n");
-                break;
-            }
-
-            NodeType type = (strcasecmp(typeStr, "DIR") == 0) ? DIRECTORY_NODE : FILE_NODE;
-            if (createEmptyNode(parentDir, name, type))
-            {
-                printf("Successfully created %s: %s\n",
-                       type == DIRECTORY_NODE ? "directory" : "file", path);
-            }
-            break;
-
-        case CMD_COPY:
-            // Get source path
-            scanf("%s %s",path,secondPath);
-            while ((ch = getchar()) != '\n' && ch != EOF)
-                ;
-            path[sizeof(path) - 1] = '\0';
-            secondPath[sizeof(secondPath) - 1] = '\0';
-            Node *sourceNode = searchPath(root, path);
-            if (!sourceNode)
-            {
-                printf("Error: Source path not found\n");
-                break;
-            }
-
-            lastSlash = strrchr(secondPath, '/');
-            if (!lastSlash)
-            {
-                printf("Error: Invalid destination path format\n");
-                break;
-            }
-
-            *lastSlash = '\0';
-            name = lastSlash + 1;
-            Node *destDir = searchPath(root, secondPath);
-
-            if (!destDir)
-            {
-                printf("Error: Destination directory not found\n");
-                break;
-            }
-
-            if (copyNode(sourceNode, destDir, name) == 0)
-            {
-                printf("Successfully copied to: %s/%s\n", secondPath, name);
-            }
-            break;
-
-        case CMD_DELETE:
-            scanf("%s",path);
-            while ((ch = getchar()) != '\n' && ch != EOF)
-                ;
-            path[sizeof(path) - 1] = '\0';
-
-            Node *nodeToDelete = searchPath(root, path);
-            if (!nodeToDelete)
-            {
-                printf("Error: Path not found\n");
-                break;
-            }
-
-            if (deleteNode(nodeToDelete) == 0)
-            {
-                printf("Successfully deleted: %s\n", path);
-            }
-            break;
-
-        case CMD_UNKNOWN:
-            while ((ch = getchar()) != '\n' && ch != EOF)
-                ;
-            printf("Unknown command: %s\n", Command);
-            printUsage();
-            break;
+            snprintf(response, response_size, "Error: Parent directory not found");
+            return;
         }
+
+        NodeType type = (strcasecmp(typeStr, "DIR") == 0) ? DIRECTORY_NODE : FILE_NODE;
+        if (createEmptyNode(parentDir, name, type))
+        {
+            snprintf(response, response_size, "Successfully created %s: %s",
+                     type == DIRECTORY_NODE ? "directory" : "file", path);
+        }
+        else
+        {
+            snprintf(response, response_size, "Error creating node");
+        }
+        break;
+
+    case CMD_COPY:
+        if (sscanf(cmd_start, "%s %s", path, secondPath) != 2)
+        {
+            snprintf(response, response_size, "Error: Source and destination paths required");
+            return;
+        }
+
+        Node *sourceNode = searchPath(root, path);
+        if (!sourceNode)
+        {
+            snprintf(response, response_size, "Error: Source path not found");
+            return;
+        }
+
+        lastSlash = strrchr(secondPath, '/');
+        if (!lastSlash)
+        {
+            snprintf(response, response_size, "Error: Invalid destination path format");
+            return;
+        }
+
+        *lastSlash = '\0';
+        name = lastSlash + 1;
+        Node *destDir = searchPath(root, secondPath);
+
+        if (!destDir)
+        {
+            snprintf(response, response_size, "Error: Destination directory not found");
+            return;
+        }
+
+        if (copyNode(sourceNode, destDir, name) == 0)
+        {
+            snprintf(response, response_size, "Successfully copied to: %s/%s", secondPath, name);
+        }
+        else
+        {
+            snprintf(response, response_size, "Error copying node");
+        }
+        break;
+
+    case CMD_DELETE:
+        if (sscanf(cmd_start, "%s", path) != 1)
+        {
+            snprintf(response, response_size, "Error: Path required");
+            return;
+        }
+
+        Node *nodeToDelete = searchPath(root, path);
+        if (!nodeToDelete)
+        {
+            snprintf(response, response_size, "Error: Path not found");
+            return;
+        }
+
+        if (deleteNode(nodeToDelete) == 0)
+        {
+            snprintf(response, response_size, "Successfully deleted: %s", path);
+        }
+        else
+        {
+            snprintf(response, response_size, "Error deleting node");
+        }
+        break;
+
+    case CMD_UNKNOWN:
+        snprintf(response, response_size, "Unknown command: %s\nUsage: READ|WRITE|CREATE|COPY|DELETE|META|STREAM <args>", command);
+        break;
     }
 }

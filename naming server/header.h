@@ -5,7 +5,6 @@
 #include <string.h>
 #include <dirent.h>
 #include <sys/stat.h>
-#include <pthread.h>
 #include <unistd.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -18,8 +17,8 @@
 #define TABLE_SIZE 10
 #define MAX_COMMAND_LENGTH 10
 #define MAX_PATH_LENGTH 1024
-#define MAX_CONTENT_LENGTH 100001
-#define CHUNK_SIZE 100001
+#define MAX_CONTENT_LENGTH 4096
+#define CHUNK_SIZE 1024
 
 typedef enum
 {
@@ -58,12 +57,6 @@ typedef struct Node
     struct NodeTable *children; 
 } Node;
 
-struct ClientData
-{
-    int socket;
-    Node *root;
-};
-
 typedef struct NodeTable
 {
     Node *table[TABLE_SIZE];
@@ -85,8 +78,7 @@ void freeNode(Node *node);
 void traverseAndAdd(Node *parentDir, const char *path);
 CommandType parseCommand(const char *cmd);
 void printUsage();
-void processCommand_namingServer(Node *root, char *input, char *response, size_t response_size);
-void processCommand_user(Node *root, char *input, int client_socket);
+void processCommand(Node *root);
 Node *createEmptyNode(Node *parentDir, const char *name, NodeType type);
 int deleteNode(Node *node);
 int copyNode(Node *sourceNode, Node *destDir, const char *newName);

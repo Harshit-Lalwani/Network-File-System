@@ -4,31 +4,41 @@
 int sendNodeChain(int sock, Node *node)
 {
     Node *current = node;
-
+    char ack[1024];
     while (current != NULL)
     {
         // Send marker for valid node
         int valid_marker = 1;
         if (send(sock, &valid_marker, sizeof(int), 0) < 0)
             return -1;
+        recv(sock,ack,sizeof(ack),0);
 
         // Send node data
         int name_len = strlen(current->name) + 1;
         if (send(sock, &name_len, sizeof(int), 0) < 0)
             return -1;
+        recv(sock, ack, sizeof(ack), 0);
+
         if (send(sock, current->name, name_len, 0) < 0)
             return -1;
+        recv(sock, ack, sizeof(ack), 0);
 
         if (send(sock, &current->type, sizeof(NodeType), 0) < 0)
             return -1;
+        recv(sock, ack, sizeof(ack), 0);
+
         if (send(sock, &current->permissions, sizeof(Permissions), 0) < 0)
             return -1;
+        recv(sock, ack, sizeof(ack), 0);
 
         int loc_len = strlen(current->dataLocation) + 1;
         if (send(sock, &loc_len, sizeof(int), 0) < 0)
             return -1;
+        recv(sock, ack, sizeof(ack), 0);
+
         if (send(sock, current->dataLocation, loc_len, 0) < 0)
             return -1;
+        recv(sock, ack, sizeof(ack), 0);
 
         // If this node has children (is a directory)
         if (current->type == DIRECTORY_NODE && current->children != NULL)
@@ -37,6 +47,7 @@ int sendNodeChain(int sock, Node *node)
             int has_children = 1;
             if (send(sock, &has_children, sizeof(int), 0) < 0)
                 return -1;
+            recv(sock, ack, sizeof(ack), 0);
 
             // Send the entire hash table of children
             for (int i = 0; i < TABLE_SIZE; i++)
@@ -51,15 +62,17 @@ int sendNodeChain(int sock, Node *node)
             int has_children = 0;
             if (send(sock, &has_children, sizeof(int), 0) < 0)
                 return -1;
+            recv(sock, ack, sizeof(ack), 0);
         }
 
         current = current->next;
     }
-
+    // sleep(1);
     // Send end of chain marker
     int end_marker = -1;
     if (send(sock, &end_marker, sizeof(int), 0) < 0)
         return -1;
+    recv(sock, ack, sizeof(ack), 0);
 
     return 0;
 }
@@ -67,31 +80,28 @@ int sendNodeChain(int sock, Node *node)
 // Function to send server information including the hash table
 int sendServerInfo(int sock, const char *ip, int nm_port, int client_port, Node *root)
 {
-    // Send initialization message
-    char init_msg = 'I';
-    if (send(sock, &init_msg, sizeof(char), 0) < 0)
-    {
-        perror("Failed to send init message");
-        return -1;
-    }
+    char buffer[1024]; // Adjust the size as needed
+    int offset = 0;
 
-    // Send server details
-    if (send(sock, ip, 16, 0) < 0)
-    {
-        perror("Failed to send IP address");
-        return -1;
-    }
-    if (send(sock, &nm_port, sizeof(int), 0) < 0)
-    {
-        perror("Failed to send NM port");
-        return -1;
-    }
-    if (send(sock, &client_port, sizeof(int), 0) < 0)
-    {
-        perror("Failed to send client port");
-        return -1;
-    }
+    // Copy IP address to buffer
+    memcpy(buffer + offset, ip, 16);
+    offset += 16;
 
+    // Copy NM port to buffer
+    memcpy(buffer + offset, &nm_port, sizeof(int));
+    offset += sizeof(int);
+
+    // Copy client port to buffer
+    memcpy(buffer + offset, &client_port, sizeof(int));
+    offset += sizeof(int);
+
+    // Send the entire buffer
+    if (send(sock, buffer, offset, 0) < 0)
+    {
+        perror("Failed to send data");
+        return -1;
+    }
+    recv(sock, buffer, sizeof(buffer), 0);
     // Send the root node and its entire structure
     return sendNodeChain(sock, root);
 }

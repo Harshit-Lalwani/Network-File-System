@@ -105,6 +105,7 @@ Node *receiveNodeChain(int sock)
         int marker;
         if (recv(sock, &marker, sizeof(int), 0) <= 0)
             return NULL;
+        send(sock,"OK",2,0);
         if (marker == -1)
             break; // End of chain
 
@@ -112,12 +113,15 @@ Node *receiveNodeChain(int sock)
         int name_len;
         if (recv(sock, &name_len, sizeof(int), 0) <= 0)
             return NULL;
+        send(sock, "OK", 2, 0);
+
         char *name = malloc(name_len);
         if (recv(sock, name, name_len, 0) <= 0)
         {
             free(name);
             return NULL;
         }
+        send(sock, "OK", 2, 0);
 
         NodeType type;
         Permissions permissions;
@@ -126,11 +130,14 @@ Node *receiveNodeChain(int sock)
             free(name);
             return NULL;
         }
+        send(sock, "OK", 2, 0);
+
         if (recv(sock, &permissions, sizeof(Permissions), 0) <= 0)
         {
             free(name);
             return NULL;
         }
+        send(sock, "OK", 2, 0);
 
         int loc_len;
         if (recv(sock, &loc_len, sizeof(int), 0) <= 0)
@@ -138,6 +145,8 @@ Node *receiveNodeChain(int sock)
             free(name);
             return NULL;
         }
+        send(sock, "OK", 2, 0);
+
         char *dataLocation = malloc(loc_len);
         if (recv(sock, dataLocation, loc_len, 0) <= 0)
         {
@@ -145,6 +154,7 @@ Node *receiveNodeChain(int sock)
             free(dataLocation);
             return NULL;
         }
+        send(sock, "OK", 2, 0);
 
         // Create new node
         Node *newNode = createNode(name, type, permissions, dataLocation);
@@ -158,6 +168,7 @@ Node *receiveNodeChain(int sock)
             freeNode(newNode);
             return NULL;
         }
+        send(sock, "OK", 2, 0);
 
         if (has_children)
         {
@@ -198,23 +209,19 @@ Node *receiveNodeChain(int sock)
 // Function to receive all server information
 int receiveServerInfo(int sock, char *ip_out, int *nm_port_out, int *client_port_out, Node **root_out)
 {
-    // Receive initialization message
-    char init_msg;
-    if (recv(sock, &init_msg, sizeof(char), 0) <= 0)
+    char buffer[1024];
+    int bytes_received;
+    bytes_received = recv(sock, buffer, sizeof(buffer), 0);
+    if (bytes_received <= 0)
+    {
+        perror("Failed to receive data");
         return -1;
-    if (init_msg != 'I')
-        return -1;
-
-    // Receive server details
-    if (recv(sock, ip_out, 16, 0) <= 0)
-        return -1;
-    if (recv(sock, nm_port_out, sizeof(int), 0) <= 0)
-        return -1;
-    if (recv(sock, client_port_out, sizeof(int), 0) <= 0)
-        return -1;
-
-    
-    // Receive the root node and its entire structure
+    }
+    memcpy(ip_out, buffer, 16);
+    memcpy(nm_port_out, buffer + 16, sizeof(int));  
+    memcpy(client_port_out, buffer + 16 + sizeof(int), sizeof(int));
+    ip_out[15] = '\0';
+    send(sock,buffer,sizeof(buffer),0);
     *root_out = receiveNodeChain(sock);
     if (*root_out == NULL)
         return -1;

@@ -7,6 +7,8 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <errno.h>
+#include <signal.h>
+#include <sys/wait.h>
 
 #define MAX_BUFFER_SIZE 100001
 #define SERVER_PORT 8080
@@ -276,18 +278,39 @@ void handleStream(int sock, const char *command)
 {
     char buffer[100001];
     ssize_t bytes_received;
-    FILE *temp_file = fopen("temp_song.mp3", "wb"); // Temporary file to store song data
+    int pipe_fd[2];
+    pid_t ffplay_pid;
+    int stop_stream = 0;
 
-    if (temp_file == NULL)
+    if (pipe(pipe_fd) == -1)
     {
-        perror("Error opening temporary file");
+        perror("Pipe creation failed");
         return;
     }
 
-    // Send initial command
+    ffplay_pid = fork();
+    if (ffplay_pid == -1)
+    {
+        perror("Fork failed");
+        close(pipe_fd[0]);
+        close(pipe_fd[1]);
+        return;
+    }
+
+    if (ffplay_pid == 0)
+    {
+        close(pipe_fd[1]);
+        dup2(pipe_fd[0], STDIN_FILENO);
+        close(pipe_fd[0]);
+        execlp("ffplay", "ffplay", "-i", "pipe:0", "-nodisp", "-autoexit", "-loglevel", "quiet", NULL);
+        perror("Failed to execute ffplay");
+        exit(1);
+    }
+
+    close(pipe_fd[0]);
+
     send(sock, command, strlen(command), 0);
 
-    // Wait for stream start
     bytes_received = recv(sock, buffer, sizeof(buffer), 0);
     buffer[bytes_received] = '\0';
 
@@ -295,39 +318,39 @@ void handleStream(int sock, const char *command)
     {
         printf("Stream started...\n");
 
-        // Receive data chunks
         while ((bytes_received = recv(sock, buffer, sizeof(buffer), 0)) > 0)
         {
             buffer[bytes_received] = '\0';
-            send(sock, command, strlen(command), 0); // Send acknowledgment
+
+            send(sock, command, strlen(command), 0);
+
             if (strcmp(buffer, "END_STREAM\n") == 0)
             {
-                break; // End of stream
+                break;
             }
 
-            // Write data to temp file
-            fwrite(buffer, 1, bytes_received, temp_file);
-
-            printf("Received chunk: %zd bytes\n", bytes_received);
+            write(pipe_fd[1], buffer, bytes_received);
+            printf("Streaming chunk: %zd bytes\n", bytes_received);
             memset(buffer, 0, sizeof(buffer));
+
+            if (stop_stream)
+            {
+                break;
+            }
         }
 
-        printf("Stream complete. Playing song...\n");
-
-        fclose(temp_file); // Close the file before playing
-
-        // Play the song (platform-dependent command)
-        system("ffplay -autoexit temp_song.mp3"); // Uses ffplay to play the song
-        // Alternatively, for macOS, you could use: system("afplay temp_song.mp3");
-
-        // Optionally delete the temp file after playing
-        remove("temp_song.mp3");
+        printf("Stream complete.\n");
     }
     else
     {
         printf("Error: %s", buffer);
-        fclose(temp_file);
     }
+
+    close(pipe_fd[1]);
+
+    kill(ffplay_pid, SIGTERM);
+    int status;
+    waitpid(ffplay_pid, &status, 0);
 }
 
 int connect_naming_server(int sock,char* command)

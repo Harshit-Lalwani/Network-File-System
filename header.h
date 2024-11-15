@@ -85,13 +85,13 @@ void freeNode(Node *node);
 void traverseAndAdd(Node *parentDir, const char *path);
 CommandType parseCommand(const char *cmd);
 void printUsage();
-void processCommand_namingServer(Node *root, char *input, char *response, size_t response_size);
+void processCommand_namingServer(Node *root, char *input, int client_socket);
 void processCommand_user(Node *root, char *input, int client_socket);
 Node *createEmptyNode(Node *parentDir, const char *name, NodeType type);
 int deleteNode(Node *node);
 int copyNode(Node *sourceNode, Node *destDir, const char *newName);
-ssize_t readFile(Node *fileNode, char *buffer, size_t size);
-ssize_t writeFile(Node *fileNode, const char *buffer, size_t size);
+// ssize_t readFile(Node *fileNode, char *buffer, size_t size);
+// ssize_t writeFile(Node *fileNode, const char *buffer, size_t size);
 int getFileMetadata(Node *fileNode, struct stat *metadata);
 ssize_t streamAudioFile(Node *fileNode, char *buffer, size_t size, off_t offset);
 

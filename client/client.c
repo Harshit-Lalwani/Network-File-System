@@ -9,7 +9,7 @@
 #include <errno.h>
 
 #define MAX_BUFFER_SIZE 100001
-#define SERVER_PORT 8081
+#define SERVER_PORT 8080
 #define SERVER_IP "127.0.0.1" // Change this to your server's IP
 
 void displayHelp()
@@ -23,7 +23,7 @@ void displayHelp()
     printf("HELP - Display this help message\n\n");
 }
 
-int connectToServer()
+int connectToServer(int port)
 {
     int sock = socket(AF_INET, SOCK_STREAM, 0);
     if (sock < 0)
@@ -35,7 +35,7 @@ int connectToServer()
     struct sockaddr_in server_addr;
     memset(&server_addr, 0, sizeof(server_addr));
     server_addr.sin_family = AF_INET;
-    server_addr.sin_port = htons(SERVER_PORT);
+    server_addr.sin_port = htons(port);
 
     if (inet_pton(AF_INET, SERVER_IP, &server_addr.sin_addr) <= 0)
     {
@@ -50,6 +50,7 @@ int connectToServer()
         close(sock);
         return -1;
     }
+
 
     return sock;
 }
@@ -329,9 +330,21 @@ void handleStream(int sock, const char *command)
     }
 }
 
+int connect_naming_server(int sock,char* command)
+{
+    send(sock, command, strlen(command), 0);
+    char buffer[100001];
+    recv(sock, buffer, sizeof(buffer), 0);
+    int port;
+    char ip[20];
+    sscanf(buffer, "StorageServer: %s : %d", ip, &port);
+    printf("%d %s",port,ip);
+    return port;
+}
+
 int main()
 {
-    int sock = connectToServer();
+    int sock = connectToServer(8081);
     if (sock < 0)
     {
         return 1;
@@ -368,19 +381,28 @@ int main()
 
         if (strncmp(command, "READ ", 5) == 0)
         {
-            handleRead(sock, command);
+            int port=connect_naming_server(sock,command);
+            printf("%d\n",port);
+            int sock2=connectToServer(port);
+            handleRead(sock2, command);
         }
         else if (strncmp(command, "WRITE ", 6) == 0)
         {
-            handleWrite(sock,command);
+            int port = connect_naming_server(sock, command);
+            int sock2 = connectToServer(port);
+            handleWrite(sock2,command);
         }
         else if (strncmp(command, "META ", 5) == 0)
         {
-            handleMeta(sock, command);
+            int port = connect_naming_server(sock, command);
+            int sock2 = connectToServer(port);
+            handleMeta(sock2, command);
         }
         else if (strncmp(command, "STREAM ", 7) == 0)
         {
-            handleStream(sock, command);
+            int port = connect_naming_server(sock, command);
+            int sock2 = connectToServer(port);
+            handleStream(sock2, command);
         }
         else
         {

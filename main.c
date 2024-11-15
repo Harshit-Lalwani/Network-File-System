@@ -177,7 +177,7 @@ int main()
     }
 
     // Prepare and send server information
-    if (sendServerInfo(naming_server_sock, "127.0.0.1", PORT, PORT + 1, root) < 0)
+    if (sendServerInfo(naming_server_sock, "127.0.0.1", PORT, PORT + 2, root) < 0)
     {
         printf("Failed to send server information\n");
     }
@@ -197,7 +197,7 @@ int main()
 
     storage_serv_addr.sin_family = AF_INET;
     storage_serv_addr.sin_addr.s_addr = INADDR_ANY;
-    storage_serv_addr.sin_port = htons(PORT + 1); // Use different port for client connections
+    storage_serv_addr.sin_port = htons(PORT + 2); // Use different port for client connections
 
     // Enable address reuse
     int opt = 1;

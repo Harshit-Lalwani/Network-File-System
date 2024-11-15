@@ -247,16 +247,8 @@ void processCommand_user(Node *root, char *input, int client_socket)
                 memset(buffer,0,sizeof(buffer));
                 offset += bytes;
                 chunks++;
-                usleep(100000); // 100ms delay
-
-                // if (chunks >= 5)
-                // {
-                //     send(client_socket, "Stream demo limited to 5 chunks\n",
-                //          strlen("Stream demo limited to 5 chunks\n"), 0);
-                //     break;
-                // }
+                usleep(100000); 
             }
-
             send(client_socket, "END_STREAM\n", strlen("END_STREAM\n"), 0);
             recv(client_socket, buffer, sizeof(buffer), 0);
         }
@@ -275,7 +267,7 @@ void processCommand_namingServer(Node *root, char *input, int client_socket)
     char typeStr[5];
     struct stat metadata;
     char command[20];
-    char response[1024];
+    char response[100001];
 
     // Clear any leading/trailing whitespace
     char *cmd_start = input;
@@ -315,14 +307,16 @@ void processCommand_namingServer(Node *root, char *input, int client_socket)
     case CMD_CREATE:
         if (sscanf(cmd_start, "%s %s", typeStr, path) != 2)
         {
-            snprintf(response, response_size, "Error: Type and path required");
+            snprintf(response, sizeof(response), "Error: Type and path required");
+            send(client_socket, response, strlen(response), 0);
             return;
         }
 
         char *lastSlash = strrchr(path, '/');
         if (!lastSlash)
         {
-            snprintf(response, response_size, "Error: Invalid path format");
+            snprintf(response, sizeof(response), "Error: Invalid path format");
+            send(client_socket, response, strlen(response), 0);
             return;
         }
 
@@ -333,40 +327,46 @@ void processCommand_namingServer(Node *root, char *input, int client_socket)
 
         if (!parentDir)
         {
-            snprintf(response, response_size, "Error: Parent directory not found");
+            snprintf(response, sizeof(response), "Error: Parent directory not found");
+            send(client_socket, response, strlen(response), 0);
             return;
         }
 
         NodeType type = (strcasecmp(typeStr, "DIR") == 0) ? DIRECTORY_NODE : FILE_NODE;
         if (createEmptyNode(parentDir, name, type))
         {
-            snprintf(response, response_size, "Successfully created %s: %s",
+            snprintf(response, sizeof(response), "Successfully created %s: %s",
                      type == DIRECTORY_NODE ? "directory" : "file", path);
+            send(client_socket, response, strlen(response), 0);
         }
         else
         {
-            snprintf(response, response_size, "Error creating node");
+            snprintf(response, sizeof(response), "Error creating node");
+            send(client_socket, response, strlen(response), 0);
         }
         break;
 
     case CMD_COPY:
         if (sscanf(cmd_start, "%s %s", path, secondPath) != 2)
         {
-            snprintf(response, response_size, "Error: Source and destination paths required");
+            snprintf(response, sizeof(response), "Error: Source and destination paths required");
+            send(client_socket, response, strlen(response), 0);
             return;
         }
 
         Node *sourceNode = searchPath(root, path);
         if (!sourceNode)
         {
-            snprintf(response, response_size, "Error: Source path not found");
+            snprintf(response, sizeof(response), "Error: Source path not found");
+            send(client_socket, response, strlen(response), 0);
             return;
         }
 
         lastSlash = strrchr(secondPath, '/');
         if (!lastSlash)
         {
-            snprintf(response, response_size, "Error: Invalid destination path format");
+            snprintf(response, sizeof(response), "Error: Invalid destination path format");
+            send(client_socket, response, strlen(response), 0);
             return;
         }
 
@@ -376,46 +376,54 @@ void processCommand_namingServer(Node *root, char *input, int client_socket)
 
         if (!destDir)
         {
-            snprintf(response, response_size, "Error: Destination directory not found");
+            snprintf(response, sizeof(response), "Error: Destination directory not found");
+            send(client_socket, response, strlen(response), 0);
             return;
         }
 
         if (copyNode(sourceNode, destDir, name) == 0)
         {
-            snprintf(response, response_size, "Successfully copied to: %s/%s", secondPath, name);
+            snprintf(response, sizeof(response), "Successfully copied to: %s/%s", secondPath, name);
+            send(client_socket, response, strlen(response), 0);
         }
         else
         {
-            snprintf(response, response_size, "Error copying node");
+            snprintf(response, sizeof(response), "Error copying node");
+            send(client_socket, response, strlen(response), 0);
         }
         break;
 
     case CMD_DELETE:
         if (sscanf(cmd_start, "%s", path) != 1)
         {
-            snprintf(response, response_size, "Error: Path required");
+            snprintf(response, sizeof(response), "Error: Path required");
+            send(client_socket, response, strlen(response), 0);
             return;
         }
 
         Node *nodeToDelete = searchPath(root, path);
         if (!nodeToDelete)
         {
-            snprintf(response, response_size, "Error: Path not found");
+            snprintf(response, sizeof(response), "Error: Path not found");
+            send(client_socket, response, strlen(response), 0);
             return;
         }
 
         if (deleteNode(nodeToDelete) == 0)
         {
-            snprintf(response, response_size, "Successfully deleted: %s", path);
+            snprintf(response, sizeof(response), "Successfully deleted: %s", path);
+            send(client_socket, response, strlen(response), 0);
         }
         else
         {
-            snprintf(response, response_size, "Error deleting node");
+            snprintf(response, sizeof(response), "Error deleting node");
+            send(client_socket, response, strlen(response), 0);
         }
         break;
 
     case CMD_UNKNOWN:
-        snprintf(response, response_size, "Unknown command: %s\nUsage: READ|WRITE|CREATE|COPY|DELETE|META|STREAM <args>", command);
+        snprintf(response, sizeof(response), "Unknown command: %s\nUsage:CREATE|COPY|DELETE <args>", command);
+        send(client_socket, response, strlen(response), 0);
         break;
     }
 }

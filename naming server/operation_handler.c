@@ -149,7 +149,7 @@ void processCommand(Node *root)
             break;
 
         case CMD_CREATE:
-
+            
             scanf("%s %s",typeStr,path);
             while ((ch = getchar()) != '\n' && ch != EOF)
                 ;

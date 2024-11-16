@@ -14,6 +14,7 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <asm-generic/socket.h>
+#include<stdbool.h>
 #define TABLE_SIZE 10
 #define MAX_COMMAND_LENGTH 10
 #define MAX_PATH_LENGTH 1024
@@ -57,6 +58,33 @@ typedef struct Node
     struct NodeTable *children; 
 } Node;
 
+typedef struct StorageServer
+{
+    char ip[16];
+    int nm_port;
+    int client_port;
+    Node *root;
+    int socket;
+    bool active;
+    pthread_mutex_t lock;
+    struct StorageServer *next; // For collision handling in storage server hash table
+} StorageServer;
+
+// Hash table for storage servers
+typedef struct StorageServerTable
+{
+    StorageServer *table[TABLE_SIZE];
+    pthread_mutex_t locks[TABLE_SIZE]; // Bucket-level locks for better concurrency
+    int count;                         // Number of storage servers
+} StorageServerTable;
+
+typedef struct AcceptorArgs
+{
+    int server_fd;
+    struct sockaddr_in server_addr;
+    StorageServerTable *server_table;
+} AcceptorArgs;
+
 typedef struct NodeTable
 {
     Node *table[TABLE_SIZE];
@@ -86,5 +114,5 @@ ssize_t readFile(Node *fileNode, char *buffer, size_t size);
 ssize_t writeFile(Node *fileNode, const char *buffer, size_t size);
 int getFileMetadata(Node *fileNode, struct stat *metadata);
 ssize_t streamAudioFile(Node *fileNode, char *buffer, size_t size, off_t offset);
-
+int receiveServerInfo(int sock, char *ip_out, int *nm_port_out, int *client_port_out, Node **root_out);
 #endif

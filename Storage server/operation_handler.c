@@ -317,12 +317,12 @@ void processCommand_namingServer(Node *root, char *input, int client_socket)
     }
 
     CommandType cmd = parseCommand(command);
-
+    int temp;
     // Handle different command types
     switch (cmd)
     {
     case CMD_CREATE:
-        if (sscanf(cmd_start, "%s %s", typeStr, path) != 2)
+        if (sscanf(cmd_start, "%s %d %s", typeStr,&temp, path) != 3)
         {
             snprintf(response, sizeof(response), "Error: Type and path required");
             send(client_socket, response, strlen(response), 0);
@@ -352,8 +352,9 @@ void processCommand_namingServer(Node *root, char *input, int client_socket)
         NodeType type = (strcasecmp(typeStr, "DIR") == 0) ? DIRECTORY_NODE : FILE_NODE;
         if (createEmptyNode(parentDir, name, type))
         {
-            // snprintf(response, sizeof(response), "CREATE DONE");
-            send(client_socket, "CREATE DONE", strlen("CREATE DONE"), 0);
+            snprintf(response, sizeof(response), "CREATE DONE");
+            send(client_socket, response, strlen(response), 0);
+            
             return ;
         }
         else

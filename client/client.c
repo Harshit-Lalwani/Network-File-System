@@ -25,7 +25,14 @@ void displayHelp()
     printf("HELP - Display this help message\n\n");
 }
 
-int connectToServer(int port)
+// Modify the structure to return both socket and port
+struct ServerInfo
+{
+    char ip[20];
+    int port;
+};
+
+int connectToServer(const char *ip, int port)
 {
     int sock = socket(AF_INET, SOCK_STREAM, 0);
     if (sock < 0)
@@ -39,7 +46,7 @@ int connectToServer(int port)
     server_addr.sin_family = AF_INET;
     server_addr.sin_port = htons(port);
 
-    if (inet_pton(AF_INET, SERVER_IP, &server_addr.sin_addr) <= 0)
+    if (inet_pton(AF_INET, ip, &server_addr.sin_addr) <= 0)
     {
         perror("Invalid address");
         close(sock);
@@ -52,7 +59,6 @@ int connectToServer(int port)
         close(sock);
         return -1;
     }
-
 
     return sock;
 }
@@ -75,10 +81,10 @@ void handleRead(int sock, const char *command)
         long fileSize;
         sscanf(buffer, "FILE_SIZE:%ld", &fileSize);
         printf("Receiving file of size: %ld bytes\n", fileSize);
-        long size=0;
+        long size = 0;
         // Receive file content
         memset(buffer, 0, sizeof(buffer));
-        while ((bytes_received = recv(sock, buffer, sizeof(buffer), 0)) > 0 )
+        while ((bytes_received = recv(sock, buffer, sizeof(buffer), 0)) > 0)
         {
             send(sock, command, strlen(command), 0);
             // printf("%d\n",bytes_received);
@@ -205,8 +211,8 @@ void handleWrite(int sock, const char *command)
         // Append input to content buffer
         strcat(content, buffer);
         total_size += input_len;
-        printf("%s\n",buffer);
-        memset(buffer,0,sizeof(buffer));
+        printf("%s\n", buffer);
+        memset(buffer, 0, sizeof(buffer));
     }
 
     // Clear any EOF condition
@@ -243,7 +249,7 @@ void handleWrite(int sock, const char *command)
     {
         size_t chunk_size = (remaining < MAX_BUFFER_SIZE) ? remaining : MAX_BUFFER_SIZE;
         ssize_t sent = send(sock, content + offset, chunk_size, 0);
-        
+
         if (sent <= 0)
         {
             printf("Error sending data\n");
@@ -352,27 +358,33 @@ void handleStream(int sock, const char *command)
     waitpid(ffplay_pid, &status, 0);
 }
 
-int connect_naming_server(int sock,char* command)
+struct ServerInfo connect_naming_server(int sock, char *command)
 {
+    struct ServerInfo server = {"", 0}; // Initialize with empty IP and port 0
+
     send(sock, command, strlen(command), 0);
     char buffer[100001];
     recv(sock, buffer, sizeof(buffer), 0);
-    int port;
-    char ip[20];
-    sscanf(buffer, "StorageServer: %s : %d", ip, &port);
-    printf("%d %s",port,ip);
-    return port;
-}
 
+    // Check if path not found
+    if (strcmp(buffer, "Path not found in any storage server") == 0)
+    {
+        return server; // Return with null port (0)
+    }
+
+    sscanf(buffer, "StorageServer: %s : %d", server.ip, &server.port);
+    printf("%d %s", server.port, server.ip);
+    return server;
+}
 int main()
 {
-    int sock = connectToServer(8081);
-    if (sock < 0)
+    int naming_sock = connectToServer(SERVER_IP, 8081);
+    if (naming_sock < 0)
     {
         return 1;
     }
 
-    printf("Connected to server at %s:%d\n", SERVER_IP, SERVER_PORT);
+    printf("Connected to server at %s:%d\n", SERVER_IP, 8081);
     displayHelp();
 
     char command[MAX_BUFFER_SIZE];
@@ -397,50 +409,86 @@ int main()
 
         if (strcmp(command, "EXIT") == 0)
         {
-            send(sock, command, strlen(command), 0);
+            send(naming_sock, command, strlen(command), 0);
             break;
         }
 
         if (strncmp(command, "READ ", 5) == 0)
         {
-            int port=connect_naming_server(sock,command);
-            printf("%d\n",port);
-            int sock2=connectToServer(port);
-            handleRead(sock2, command);
+            struct ServerInfo storage_server = connect_naming_server(naming_sock, command);
+            if (storage_server.port == 0)
+            {
+                printf("Path not found in any storage server\n");
+                continue;
+            }
+            int storage_sock = connectToServer(storage_server.ip, storage_server.port);
+            if (storage_sock < 0)
+            {
+                continue;
+            }
+            handleRead(storage_sock, command);
+            close(storage_sock);
         }
         else if (strncmp(command, "WRITE ", 6) == 0)
         {
-            int port = connect_naming_server(sock, command);
-            int sock2 = connectToServer(port);
-            handleWrite(sock2,command);
+            struct ServerInfo storage_server = connect_naming_server(naming_sock, command);
+            if (storage_server.port == 0)
+            {
+                printf("Path not found in any storage server\n");
+                continue;
+            }
+            int storage_sock = connectToServer(storage_server.ip, storage_server.port);
+            if (storage_sock < 0)
+            {
+                continue;
+            }
+            handleWrite(storage_sock, command);
+            close(storage_sock);
         }
         else if (strncmp(command, "META ", 5) == 0)
         {
-            int port = connect_naming_server(sock, command);
-            int sock2 = connectToServer(port);
-            handleMeta(sock2, command);
+            struct ServerInfo storage_server = connect_naming_server(naming_sock, command);
+            if (storage_server.port == 0)
+            {
+                printf("Path not found in any storage server\n");
+                continue;
+            }
+            int storage_sock = connectToServer(storage_server.ip, storage_server.port);
+            if (storage_sock < 0)
+            {
+                continue;
+            }
+            handleMeta(storage_sock, command);
+            close(storage_sock);
         }
         else if (strncmp(command, "STREAM ", 7) == 0)
         {
-            int port = connect_naming_server(sock, command);
-            int sock2 = connectToServer(port);
-            handleStream(sock2, command);
+            struct ServerInfo storage_server = connect_naming_server(naming_sock, command);
+            if (storage_server.port == 0)
+            {
+                printf("Path not found in any storage server\n");
+                continue;
+            }
+            int storage_sock = connectToServer(storage_server.ip, storage_server.port);
+            if (storage_sock < 0)
+            {
+                continue;
+            }
+            handleStream(storage_sock, command);
+            close(storage_sock);
         }
         else if (strncmp(command, "CREATE ", 7) == 0)
         {
             char respond[100001];
-            send(sock,command,strlen(command),0);
-            recv(sock,respond,sizeof(respond),0);
-            // char respond2[100001];
-            // recv(sock, respond2, sizeof(respond2), 0);
-            // // send()
-            printf("%s\n",respond);
+            send(naming_sock, command, strlen(command), 0);
+            recv(naming_sock, respond, sizeof(respond), 0);
+            printf("%s\n", respond);
         }
         else if (strncmp(command, "DELETE ", 7) == 0)
         {
             char respond[100001];
-            send(sock, command, strlen(command), 0);
-            recv(sock, respond, sizeof(respond), 0);
+            send(naming_sock, command, strlen(command), 0);
+            recv(naming_sock, respond, sizeof(respond), 0);
             printf("%s\n", respond);
         }
         else
@@ -449,7 +497,7 @@ int main()
         }
     }
 
-    close(sock);
+    close(naming_sock);
     printf("Connection closed.\n");
     return 0;
 }

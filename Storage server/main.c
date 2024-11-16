@@ -1,5 +1,5 @@
 #include "header.h"
-#define PORT 8080
+#define PORT 8083
 
 int sendNodeChain(int sock, Node *node)
 {
@@ -163,7 +163,7 @@ void *namingServerHandler(void *arg)
             struct sockaddr_in naming_serv_addr;
             naming_server_sock = socket(AF_INET, SOCK_STREAM, 0);
             naming_serv_addr.sin_family = AF_INET;
-            naming_serv_addr.sin_port = htons(PORT);
+            naming_serv_addr.sin_port = htons(8080);
             inet_pton(AF_INET, "127.0.0.1", &naming_serv_addr.sin_addr);
 
             while (connect(naming_server_sock, (struct sockaddr *)&naming_serv_addr,
@@ -191,8 +191,8 @@ void *namingServerHandler(void *arg)
 // Main function
 int main()
 {
-    Node *root = createNode("/home/mehulagarwal/Documents/sem2", DIRECTORY_NODE, READ | WRITE | EXECUTE, "/home/mehulagarwal/Documents/sem2");
-    traverseAndAdd(root, "/home/mehulagarwal/Documents/sem2");
+    Node *root = createNode("/home/mehulagarwal/Documents/sem1", DIRECTORY_NODE, READ | WRITE | EXECUTE, "/home/mehulagarwal/Documents/sem1");
+    traverseAndAdd(root, "/home/mehulagarwal/Documents/sem1");
     // printFileSystemTree(root,10);
     int naming_server_sock;
     struct sockaddr_in naming_naming_serv_addr;
@@ -204,7 +204,7 @@ int main()
         exit(EXIT_FAILURE);
     }
     naming_serv_addr.sin_family = AF_INET;
-    naming_serv_addr.sin_port = htons(PORT);
+    naming_serv_addr.sin_port = htons(8080);
     if (inet_pton(AF_INET, "127.0.0.1", &naming_serv_addr.sin_addr) <= 0)
     {
         perror("Invalid address or address not supported");
@@ -223,7 +223,7 @@ int main()
             break;
         }
     }
-    if (sendServerInfo(naming_server_sock, "127.0.0.1", PORT, PORT + 2, root) < 0)
+    if (sendServerInfo(naming_server_sock, "127.0.0.1", 8080, 8085, root) < 0)
     {
         printf("Failed to send server information\n");
     }
@@ -251,7 +251,7 @@ int main()
     }
     storage_serv_addr.sin_family = AF_INET;
     storage_serv_addr.sin_addr.s_addr = INADDR_ANY;
-    storage_serv_addr.sin_port = htons(PORT + 2);
+    storage_serv_addr.sin_port = htons(8085);
     int opt = 1;
     if (setsockopt(storage_server_sock, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)) < 0)
     {
@@ -268,7 +268,7 @@ int main()
         perror("Listen failed");
         exit(EXIT_FAILURE);
     }
-    printf("Storage server is listening for client connections on port %d...\n", PORT + 1);
+    printf("Storage server is listening for client connections on port %d...\n", PORT + 2);
     while (1)
     {
         struct sockaddr_in client_addr;

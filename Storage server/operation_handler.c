@@ -61,6 +61,19 @@ ssize_t writeFileChunk(Node *node, const char *buffer, size_t size, off_t offset
     return bytes;
 }
 
+void getPermissionsString(int mode, char *permissions, size_t size)
+{
+    permissions[0] = '\0'; // Start with an empty string
+    if (mode & READ)
+        strncat(permissions, "READ ", size - strlen(permissions) - 1);
+    if (mode & WRITE)
+        strncat(permissions, "WRITE ", size - strlen(permissions) - 1);
+    if (mode & EXECUTE)
+        strncat(permissions, "EXECUTE ", size - strlen(permissions) - 1);
+    if (mode & APPEND)
+        strncat(permissions, "APPEND ", size - strlen(permissions) - 1);
+}
+
 int min(int a,int b)
 {
     if(a<b)
@@ -210,13 +223,15 @@ void processCommand_user(Node *root, char *input, int client_socket)
         {
             if (getFileMetadata(targetNode, &metadata) == 0)
             {
+                char permissions[64];
+                getPermissionsString(metadata.st_mode & 0777, permissions, sizeof(permissions));
                 snprintf(response, sizeof(response),
                          "File Metadata:\nName: %s\nType: %s\nSize: %ld bytes\n"
-                         "Permissions: %o\nLast access: %sLast modification: %s\n",
+                         "Permissions: %s\nLast access: %sLast modification: %s\n",
                          targetNode->name,
                          targetNode->type == FILE_NODE ? "File" : "Directory",
                          metadata.st_size,
-                         metadata.st_mode & 0777,
+                         permissions,
                          ctime(&metadata.st_atime),
                          ctime(&metadata.st_mtime));
                 send(client_socket, response, strlen(response), 0);
@@ -268,6 +283,7 @@ void processCommand_namingServer(Node *root, char *input, int client_socket)
     struct stat metadata;
     char command[20];
     char response[100001];
+    printf("helllo\n");
 
     // Clear any leading/trailing whitespace
     char *cmd_start = input;
@@ -277,6 +293,7 @@ void processCommand_namingServer(Node *root, char *input, int client_socket)
     // Check for empty command
     if (strlen(cmd_start) == 0)
     {
+        printf("hey\n");
         send(client_socket, "Error: Empty command\n", strlen("Error: Empty command\n"), 0);
         return;
     }
@@ -335,9 +352,9 @@ void processCommand_namingServer(Node *root, char *input, int client_socket)
         NodeType type = (strcasecmp(typeStr, "DIR") == 0) ? DIRECTORY_NODE : FILE_NODE;
         if (createEmptyNode(parentDir, name, type))
         {
-            snprintf(response, sizeof(response), "Successfully created %s: %s",
-                     type == DIRECTORY_NODE ? "directory" : "file", path);
-            send(client_socket, response, strlen(response), 0);
+            // snprintf(response, sizeof(response), "CREATE DONE");
+            send(client_socket, "CREATE DONE", strlen("CREATE DONE"), 0);
+            return ;
         }
         else
         {
@@ -383,7 +400,7 @@ void processCommand_namingServer(Node *root, char *input, int client_socket)
 
         if (copyNode(sourceNode, destDir, name) == 0)
         {
-            snprintf(response, sizeof(response), "Successfully copied to: %s/%s", secondPath, name);
+            snprintf(response, sizeof(response), "Successfully copied");
             send(client_socket, response, strlen(response), 0);
         }
         else
@@ -400,7 +417,6 @@ void processCommand_namingServer(Node *root, char *input, int client_socket)
             send(client_socket, response, strlen(response), 0);
             return;
         }
-
         Node *nodeToDelete = searchPath(root, path);
         if (!nodeToDelete)
         {
@@ -408,10 +424,9 @@ void processCommand_namingServer(Node *root, char *input, int client_socket)
             send(client_socket, response, strlen(response), 0);
             return;
         }
-
         if (deleteNode(nodeToDelete) == 0)
         {
-            snprintf(response, sizeof(response), "Successfully deleted: %s", path);
+            snprintf(response, sizeof(response), "DELETE DONE");
             send(client_socket, response, strlen(response), 0);
         }
         else

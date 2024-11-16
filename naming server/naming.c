@@ -13,7 +13,7 @@
 #define STORAGE_PORT 8080
 #define NAMING_PORT 8081
 // #define CLIENT_PORT 8082
-#define MAX_BUFFER_SIZE 1024
+#define MAX_BUFFER_SIZE 100001
 
 // Structure to store storage server information
 typedef struct
@@ -27,15 +27,17 @@ typedef struct
 StorageServerInfo storage_info;
 
 // Function to handle client requests
-void handle_client_request(int client_socket, const StorageServerInfo *storage_info)
+void handle_client_request(int client_socket, const StorageServerInfo *storage_info, int storage_socket)
 {
     char buffer[MAX_BUFFER_SIZE];
     char command[20];
     char path[MAX_PATH_LENGTH];
+    char dest_path[MAX_PATH_LENGTH];
     ssize_t bytes_received;
 
-    while ((bytes_received = recv(client_socket, buffer, sizeof(buffer) - 1, 0)) > 0)
+    while ((bytes_received = recv(client_socket, buffer, sizeof(buffer), 0)) > 0)
     {
+        // printf("krish\n\n\n\n\n");
         buffer[bytes_received] = '\0';
 
         // Parse command
@@ -51,9 +53,8 @@ void handle_client_request(int client_socket, const StorageServerInfo *storage_i
         {
             command[i] = toupper(command[i]);
         }
-
+        // printf("%s \n",path);
         // Check if path exists in the storage server's root
-        Node *node = searchPath(storage_info->root, path);
 
         if (strcmp(command, "READ") == 0 ||
             strcmp(command, "WRITE") == 0 ||
@@ -61,6 +62,7 @@ void handle_client_request(int client_socket, const StorageServerInfo *storage_i
             strcmp(command, "STREAM") == 0)
         {
 
+            Node *node = searchPath(storage_info->root, path);
             if (!node)
             {
                 send(client_socket, "Error: Path not found\n",
@@ -78,9 +80,82 @@ void handle_client_request(int client_socket, const StorageServerInfo *storage_i
                  strcmp(command, "DELETE") == 0 ||
                  strcmp(command, "COPY") == 0)
         {
+            // send(client_socket,command,sizeof(command),0);
+            char type[5];
+            if (sscanf(buffer, "CREATE %s %s", type, path) == 2)
+            {
+                // Handle CREATE FILE or CREATE DIR
+                if (strcmp(type, "FILE") == 0 || strcmp(type, "DIR") == 0)
+                {
+                    printf("hii\n");
+                    char respond[100001];
+                    send(storage_socket, buffer, strlen(buffer), 0);
+                    recv(storage_socket, respond, sizeof(respond), 0);
+                    printf("%s\n", respond);
+                    if (strncmp(respond, "CREATE DONE",12) == 0)
+                    {
+                        // printf("yeahhh\n\n\n\n\n");
+                        char *lastSlash = strrchr(path, '/');
+                        if (!lastSlash)
+                        {
+                            send(client_socket, "Error: Invalid path format", strlen("Error: Invalid path format"), 0);
+                            return;
+                        }
+                        *lastSlash = '\0';
+                        char *name = lastSlash + 1;
+                        Node *parentDir = searchPath(storage_info->root, path);
+                        *lastSlash = '/';
+                        if (!parentDir)
+                        {
+                            send(client_socket, "Error: Parent directory not found", strlen("Error: Parent directory not found"), 0);
+                            return;
+                        }
+                        NodeType typ;
+                        if (strcmp(type, "DIR")==0)
+                        {
+                            typ=DIRECTORY_NODE;
+                        }
+                        else
+                        {
+                            typ=FILE_NODE;
+                        }
+                        Node *newNode = createNode(name, typ, READ | WRITE, path);
+                        newNode->parent = parentDir;
+                        insertNode(parentDir->children, newNode);
+                    }
+                    send(client_socket, respond, strlen(respond), 0);
+                    // recv(client_socket,respond,sizeof(respond),0);
+                }
+                else
+                {
+                    send(client_socket, "Error: Invalid CREATE type\n", strlen("Error: Invalid CREATE type\n"), 0);
+                }
+            }
+            else if (sscanf(buffer, "DELETE %s", path) == 1)
+            {
 
-            // Handle these commands directly
-            // processCommand_namingServer(storage_info->root, buffer, client_socket);
+                char respond[100001];
+                send(storage_socket, buffer, sizeof(buffer), 0);
+                recv(storage_socket, respond, sizeof(respond), 0);
+                if (strcmp(respond, "DELETE DONE") == 0)
+                {
+                    Node *nodeToDelete = searchPath(storage_info->root, path);
+                    deleteNode(nodeToDelete);
+                }
+                send(client_socket, respond, sizeof(respond), 0);
+            }
+            else if (sscanf(buffer, "COPY %s %s", path, dest_path) == 2)
+            {
+                // Handle COPY
+                // if (send_copy_request(storage_info, path, dest_path) == 0)
+                // {
+                //     send(client_socket, "COPY: Success\n", strlen("COPY: Success\n"), 0);
+                // }
+                // else
+                // {
+                //     send(client_socket, "COPY: Failed\n", strlen("COPY: Failed\n"), 0);
+                // }
+            }
         }
         else if (strcmp(command, "EXIT") == 0)
         {
@@ -105,7 +180,7 @@ Node *receiveNodeChain(int sock)
         int marker;
         if (recv(sock, &marker, sizeof(int), 0) <= 0)
             return NULL;
-        send(sock,"OK",2,0);
+        send(sock, "OK", 2, 0);
         if (marker == -1)
             break; // End of chain
 
@@ -218,10 +293,10 @@ int receiveServerInfo(int sock, char *ip_out, int *nm_port_out, int *client_port
         return -1;
     }
     memcpy(ip_out, buffer, 16);
-    memcpy(nm_port_out, buffer + 16, sizeof(int));  
+    memcpy(nm_port_out, buffer + 16, sizeof(int));
     memcpy(client_port_out, buffer + 16 + sizeof(int), sizeof(int));
     ip_out[15] = '\0';
-    send(sock,buffer,sizeof(buffer),0);
+    send(sock, buffer, sizeof(buffer), 0);
     *root_out = receiveNodeChain(sock);
     if (*root_out == NULL)
         return -1;
@@ -292,6 +367,7 @@ int main()
     printf("IP: %s\n", storage_info.ip);
     printf("Naming Port: %d\n", storage_info.nm_port);
     printf("Client Port: %d\n", storage_info.client_port);
+    printf("client root %s\n",storage_info.root->name);
 
     // Initialize naming server socket for client connections
     if ((naming_server_fd = socket(AF_INET, SOCK_STREAM, 0)) == 0)
@@ -344,7 +420,7 @@ int main()
                inet_ntoa(client_addr.sin_addr), ntohs(client_addr.sin_port));
 
         // Handle client requests
-        handle_client_request(client_sock, &storage_info);
+        handle_client_request(client_sock, &storage_info, storage_sock);
         close(client_sock);
     }
 

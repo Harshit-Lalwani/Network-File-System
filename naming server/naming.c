@@ -135,14 +135,14 @@ void handle_client_request(int client_socket, const StorageServerInfo *storage_i
             {
 
                 char respond[100001];
-                send(storage_socket, buffer, sizeof(buffer), 0);
+                send(storage_socket, buffer, strlen(buffer), 0);
                 recv(storage_socket, respond, sizeof(respond), 0);
                 if (strcmp(respond, "DELETE DONE") == 0)
                 {
                     Node *nodeToDelete = searchPath(storage_info->root, path);
                     deleteNode(nodeToDelete);
                 }
-                send(client_socket, respond, sizeof(respond), 0);
+                send(client_socket, respond, strlen(respond), 0);
             }
             else if (sscanf(buffer, "COPY %s %s", path, dest_path) == 2)
             {

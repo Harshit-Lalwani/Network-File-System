@@ -332,7 +332,6 @@ void handleStream(int sock, const char *command)
             write(pipe_fd[1], buffer, bytes_received);
             printf("Streaming chunk: %zd bytes\n", bytes_received);
             memset(buffer, 0, sizeof(buffer));
-
             if (stop_stream)
             {
                 break;
@@ -426,6 +425,23 @@ int main()
             int port = connect_naming_server(sock, command);
             int sock2 = connectToServer(port);
             handleStream(sock2, command);
+        }
+        else if (strncmp(command, "CREATE ", 7) == 0)
+        {
+            char respond[100001];
+            send(sock,command,strlen(command),0);
+            recv(sock,respond,sizeof(respond),0);
+            // char respond2[100001];
+            // recv(sock, respond2, sizeof(respond2), 0);
+            // // send()
+            printf("%s\n",respond);
+        }
+        else if (strncmp(command, "DELETE ", 7) == 0)
+        {
+            char respond[100001];
+            send(sock, command, strlen(command), 0);
+            recv(sock, respond, sizeof(respond), 0);
+            printf("%s\n", respond);
         }
         else
         {

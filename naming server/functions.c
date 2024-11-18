@@ -385,3 +385,37 @@ void putLRUCache(LRUCache *cache, const char *key, Node *node)
         removeTail(cache);
     }
 }
+
+void copyDirectoryContents(Node *sourceDir, Node *destDir)
+{
+    if (!sourceDir || !destDir || sourceDir->type != DIRECTORY_NODE || destDir->type != DIRECTORY_NODE)
+    {
+        printf("Error: Invalid source or destination directory\n");
+        return;
+    }
+
+    for (int i = 0; i < TABLE_SIZE; i++)
+    {
+        Node *child = sourceDir->children->table[i];
+        while (child)
+        {
+            if (child->type == FILE_NODE)
+            {
+                // Copy file
+                addFile(destDir, child->name, child->permissions, child->dataLocation);
+            }
+            else if (child->type == DIRECTORY_NODE)
+            {
+                // Create the new directory in the destination
+                addDirectory(destDir, child->name, child->permissions);
+
+                // Find the newly created directory in the destination
+                Node *newDestDir = searchNode(destDir->children, child->name);
+
+                // Recursively copy the contents of the directory
+                copyDirectoryContents(child, newDestDir);
+            }
+            child = child->next;
+        }
+    }
+}

@@ -479,32 +479,52 @@ void *clientHandler(void *arg)
                     else
                     {
                         char init_cmd[MAX_BUFFER_SIZE];
-                        snprintf(init_cmd, sizeof(init_cmd), "INIT_COPY %s %s", path, dest_path);
                         send(source_server->socket, buffer, strlen(buffer), 0);
-                        send(dest_server->socket, buffer, strlen(buffer), 0);
                         recv(source_server->socket, init_cmd, sizeof(init_cmd), 0);
-                        recv(dest_server->socket, init_cmd, sizeof(init_cmd), 0);
-                        // snprintf(init_cmd, sizeof(init_cmd), "INIT_COPY %s %s", path, dest_path);
-                        // send(source_server->socket, init_cmd, strlen(init_cmd), 0);
-                        // send(dest_server->socket, init_cmd, strlen(init_cmd), 0);
                         char server_info[MAX_BUFFER_SIZE];
-                        snprintf(server_info, sizeof(server_info), "SOURCE SERVER_INFO %s %d", dest_server->ip, dest_server->client_port);
+                        snprintf(server_info, sizeof(server_info), "SOURCE SERVER_INFO %s %d",
+                                 dest_server->ip, dest_server->client_port);
                         send(source_server->socket, server_info, strlen(server_info), 0);
-
-                        snprintf(server_info, sizeof(server_info), "DEST SERVER_INFO %s %d",
-                                 source_server->ip, source_server->client_port);
-                        send(dest_server->socket, server_info, strlen(server_info), 0);
-                        char copy_cmd[MAX_BUFFER_SIZE];
-                        snprintf(copy_cmd, sizeof(copy_cmd), "START_COPY %s %s", path, dest_path);
-                        send(source_server->socket, copy_cmd, strlen(copy_cmd), 0);
                         char response[100001];
                         recv(source_server->socket, response, sizeof(response), 0);
+                        if (strncmp(response, "COPY DONE",9)==0)
+                        {
+                            //implement logic to copy files and directrix from the source hast table to dest in the directrix we are copying the data
+                            if (source_node->type == DIRECTORY_NODE)
+                            {
+                                Node *destParentNode = findNode(dest_server->root, parent_path);
+                                if (!destParentNode || destParentNode->type != DIRECTORY_NODE)
+                                {
+                                    printf("Error: Destination path is not a valid directory\n");
+                                    const char *error = "Destination path is not a valid directory";
+                                    send(client_socket, error, strlen(error), 0);
+                                    continue;
+                                }
+                                addDirectory(destParentNode, source_node->name, source_node->permissions);
+                                Node *newRootDir = searchNode(destParentNode->children, source_node->name);
+                                // Copy the contents of the source directory to the destination directory
+                                copyDirectoryContents(source_node, destParentNode);
+
+                                const char *success = "Directory copied successfully";
+                                send(client_socket, success, strlen(success), 0);
+                            }
+                            else
+                            {
+                                // Handle single file copy (using previous implementation)
+                                // char parent_path[MAX_PATH_LENGTH];
+                                // getParentPath(dest_path, parent_path);
+                                Node *destParentNode = findNode(dest_server->root, dest_path);
+                                addFile(destParentNode, source_node->name, source_node->permissions, source_node->dataLocation);
+                                    // handleCopyOperation(source_node, destParentNode, dest_path);
+                                const char *success = "File copied successfully";
+                                send(client_socket, success, strlen(success), 0);
+                            }
+                        }
                         send(client_socket, response, strlen(response), 0);
                     }
                 }
                 else
                 {
-                    // printf("heyyyy dear\n");
                     Node *dest_node = findNode(dest_server->root, dest_path);
                     if (dest_node->type == FILE_NODE)
                     {
@@ -514,21 +534,50 @@ void *clientHandler(void *arg)
                     }
                     else
                     {
-                        printf("%s %s \n", source_server->root->name, dest_server->root->name);
+                        printf("hello\n");
                         char init_cmd[MAX_BUFFER_SIZE];
-                        // snprintf(init_cmd, sizeof(init_cmd), "INIT_COPY %s %s", path, dest_path);
                         send(source_server->socket, buffer, strlen(buffer), 0);
-                        // send(dest_server->socket, buffer, strlen(buffer), 0);
                         recv(source_server->socket, init_cmd, sizeof(init_cmd), 0);
-                        // recv(dest_server->socket, init_cmd, sizeof(init_cmd), 0);
-                        // recv(source_server->socket, init_cmd, sizeof(init_cmd), 0);
-                        // recv(dest_server->socket, init_cmd, sizeof(init_cmd), 0);
                         char server_info[MAX_BUFFER_SIZE];
                         snprintf(server_info, sizeof(server_info), "SOURCE SERVER_INFO %s %d",
                                  dest_server->ip, dest_server->client_port);
                         send(source_server->socket, server_info, strlen(server_info), 0);
                         char response[100001];
                         recv(source_server->socket, response, sizeof(response), 0);
+                        if (strncmp(response, "COPY DONE", 9) == 0)
+                        {
+                            // implement logic to copy files and directrix from the source hast table to dest in the directrix we are copying the data
+                            if (source_node->type == DIRECTORY_NODE)
+                            {
+                                printf("%s\n",dest_path);
+                                Node *destParentNode = findNode(dest_server->root, dest_path);
+                                if (!destParentNode || destParentNode->type != DIRECTORY_NODE)
+                                {
+                                    printf("Error: Destination path is not a valid directory\n");
+                                    const char *error = "Destination path is not a valid directory";
+                                    send(client_socket, error, strlen(error), 0);
+                                    continue;
+                                }
+                                addDirectory(destParentNode, source_node->name, source_node->permissions);
+                                Node *newRootDir = searchNode(destParentNode->children, source_node->name);
+                                // Copy the contents of the source directory to the destination directory
+                                copyDirectoryContents(source_node, newRootDir);
+
+                                const char *success = "Directory copied successfully";
+                                send(client_socket, success, strlen(success), 0);
+                            }
+                            else
+                            {
+                                // Handle single file copy (using previous implementation)
+                                // char parent_path[MAX_PATH_LENGTH];
+                                // getParentPath(dest_path, parent_path);
+                                Node *destParentNode = findNode(dest_server->root, dest_path);
+                                addFile(destParentNode,source_node->name,source_node->permissions,source_node->dataLocation);
+                                // handleCopyOperation(source_node, destParentNode, dest_path);
+                                const char *success = "File copied successfully";
+                                send(client_socket, success, strlen(success), 0);
+                            }
+                        }
                         send(client_socket, response, strlen(response), 0);
                     }
                 }

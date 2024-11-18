@@ -272,19 +272,7 @@ void processCommand_user(Node *root, char *input, int client_socket)
             send(client_socket, "Error: Path required\n", strlen("Error: Path required\n"), 0);
             return;
         }
-        char *lastSlash = strrchr(path, '/');
-        if (!lastSlash)
-        {
-            snprintf(response, sizeof(response), "Error: Invalid path format");
-            send(client_socket, response, strlen(response), 0);
-            memset(response, 0, sizeof(response));
-            return;
-        }
-        *lastSlash = '\0';
-        // char *name = lastSlash + 1;
         Node *parentDir = findNode(root, path);
-        *lastSlash = '/';
-
         if (!parentDir)
         {
             snprintf(response, sizeof(response), "Error: Parent directory not found");
@@ -303,8 +291,9 @@ void processCommand_user(Node *root, char *input, int client_socket)
             size_t bytes_received;
             int totalReceived = 0;
             char node_path[1024];
-            snprintf(node_path,sizeof(node_path),"%s/%s",path,name);
-            Node* target=findNode(root,node_path);
+            snprintf(node_path, sizeof(node_path), "%s/%s", path, name);
+            // printf("%s\n", node_path);
+            Node *target = findNode(root, node_path);
             while ((bytes_received = recv(client_socket, buffer, sizeof(buffer), 0)) > 0)
             {
                 send(client_socket, command, strlen(command), 0);
@@ -325,6 +314,40 @@ void processCommand_user(Node *root, char *input, int client_socket)
             memset(response, 0, sizeof(response));
             return;
         }
+        break;
+    case CMD_DIRCOPY:
+        char name2[1024];
+        int permissions2;
+        if (sscanf(cmd_start, "%s %s %d", path, name2, &permissions2) != 3)
+        {
+            send(client_socket, "Error: Path required\n", strlen("Error: Path required\n"), 0);
+            return;
+        }
+        parentDir = findNode(root, path);
+        if (!parentDir)
+        {
+            snprintf(response, sizeof(response), "Error: Parent directory not found");
+            send(client_socket, response, strlen(response), 0);
+            memset(response, 0, sizeof(response));
+            return;
+        }
+
+        type = DIRECTORY_NODE;
+        if (createEmptyNode(parentDir, name2, type))
+        {
+            snprintf(response, sizeof(response), "CREATE DONE");
+            send(client_socket, response, strlen(response), 0);
+            memset(response, 0, sizeof(response));
+            return;
+        }
+        else
+        {
+            snprintf(response, sizeof(response), "CREATE FAILED");
+            send(client_socket, response, strlen(response), 0);
+            memset(response, 0, sizeof(response));
+            return;
+        }
+        break;
 
     case CMD_UNKNOWN:
         send(client_socket, "Unknown command: %s\nUsage: READ|WRITE|META|STREAM <args>\n", strlen("Unknown command: %s\nUsage: READ|WRITE|META|STREAM <args>\n"), 0);

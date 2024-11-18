@@ -156,5 +156,5 @@ int receiveServerInfo(int sock, char *ip_out, int *nm_port_out, int *client_port
 StorageServerList *findStorageServersByPath_List(StorageServerTable *table, const char *path);
 Node *findNode(Node *root, const char *path);
 void recursiveList(Node *node, const char *current_path, char *response, int *response_offset, size_t response_size);
-
+void copyDirectoryContents(Node *sourceDir, Node *destDir);
 #endif

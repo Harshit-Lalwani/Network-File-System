@@ -105,10 +105,8 @@ int copyNode(Node *sourceNode, Node *destDir, const char *newName);
 // ssize_t writeFile(Node *fileNode, const char *buffer, size_t size);
 int getFileMetadata(Node *fileNode, struct stat *metadata);
 ssize_t streamAudioFile(Node *fileNode, char *buffer, size_t size, off_t offset);
-void receive_file_content(int peer_socket, const char *file_path);
-void handle_peer_copy(int peer_socket);
-void copy_directory_recursive(int peer_socket, Node *dir_node, const char *dest_path);
+int copy_directory_recursive(int peer_socket, Node *dir_node, const char *dest_path, int naming_socket);
 void copy_files_to_peer(const char *source_path, const char *dest_path, const char *peer_ip, int peer_port, Node *root, int naming_socket);
-void copy_single_file(int peer_socket, Node *source_node, const char *dest_path, int naming_socket);
+int copy_single_file(int peer_socket, Node *source_node, const char *dest_path, int naming_socket);
 Node *findNode(Node *root, const char *path);
 #endif

@@ -690,6 +690,8 @@ void *storageServerAcceptor(void *arg)
     return NULL;
 }
 
+pthread_t ackListenerThread;    
+
 int main()
 {
     StorageServerTable *server_table = createStorageServerTable();
@@ -745,6 +747,17 @@ int main()
 
     // Detach the acceptor thread
     pthread_detach(storage_acceptor_thread);
+
+    if (pthread_create(&ackListenerThread, NULL, ackListener, NULL) != 0)
+    {
+        perror("Failed to create acknowledgment listener thread");
+        exit(EXIT_FAILURE);
+    }
+
+    printf("Acknowledgment listener thread started.\n");
+
+    // Detach the thread to allow independent execution
+    pthread_detach(ackListenerThread);
 
     printf("Storage server acceptor started on port %d\n", STORAGE_PORT);
 

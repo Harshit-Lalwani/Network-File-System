@@ -9,19 +9,27 @@
 #include <errno.h>
 #include <signal.h>
 #include <sys/wait.h>
+#include <pthread.h>
 
 #define MAX_BUFFER_SIZE 100001
 #define SERVER_PORT 8080
 #define SERVER_IP "127.0.0.1" // Change this to your server's IP
+#define ACK_RECEIVE_PORT 9091 // Dedicated port for receiving ACKs
+int ack_socket;               // Declare globally to be accessed by both functions
+struct sockaddr_in ack_addr;
 
 void displayHelp()
 {
     printf("\nAvailable commands:\n");
     printf("READ <path> - Read file content\n");
     printf("WRITE <path> - Write content to file\n");
+    printf("DELETE <path> - Delete a file or folder\n");
+    printf("CREATE FILE/DIR <no> <path> - Create a new file or folder\n");
+    printf("LIST <path> - List all files and folders in the specified directory\n");
     printf("META <path> - Get file metadata\n");
     printf("STREAM <path> - Stream file content\n");
     printf("EXIT - Close connection and exit\n");
+
     printf("HELP - Display this help message\n\n");
 }
 
@@ -63,6 +71,72 @@ int connectToServer(const char *ip, int port)
     }
 
     return sock;
+}
+
+void initializeAckSocket()
+{
+    // Create socket to receive acknowledgment messages
+    ack_socket = socket(AF_INET, SOCK_STREAM, 0);
+    if (ack_socket < 0)
+    {
+        perror("Socket creation failed for acknowledgment");
+        exit(-1);
+    }
+
+    // Set up the acknowledgment socket address
+    ack_addr.sin_family = AF_INET;
+    ack_addr.sin_port = htons(ACK_RECEIVE_PORT);
+    ack_addr.sin_addr.s_addr = INADDR_ANY;
+
+    // Bind the socket to the address and port
+    if (bind(ack_socket, (struct sockaddr *)&ack_addr, sizeof(ack_addr)) < 0)
+    {
+        perror("Binding failed for acknowledgment socket");
+        close(ack_socket);
+        exit(-1);
+    }
+
+    // Start listening for incoming ACKs
+    if (listen(ack_socket, 1) < 0)
+    {
+        perror("Listen failed for acknowledgment socket");
+        close(ack_socket);
+        exit(-1);
+    }
+
+    printf("Client is listening for ACKs on port %d...\n", ACK_RECEIVE_PORT);
+}
+pthread_t ack_thread;
+
+void *ackReceiver(void *arg)
+{
+    int new_sock;
+    struct sockaddr_in client_addr;
+    socklen_t addr_len = sizeof(client_addr);
+    char buffer[1024];
+
+    // Accept the incoming connection from the naming server
+    new_sock = accept(ack_socket, (struct sockaddr *)&client_addr, &addr_len);
+    if (new_sock < 0)
+    {
+        perror("Failed to accept ACK connection");
+        return NULL;
+    }
+    memset(buffer, 0 , sizeof(buffer));
+    // Receive the acknowledgment message
+    ssize_t recv_size = recv(new_sock, buffer, sizeof(buffer) - 1, 0);
+    if (recv_size > 0)
+    {
+        buffer[recv_size] = '\0'; // Null-terminate the received message
+        printf("Received ACK: %s\n", buffer);
+    }
+    else
+    {
+        perror("Failed to receive acknowledgment");
+    }
+
+    close(new_sock);
+    return NULL;
 }
 
 void handleRead(int sock, const char *command)
@@ -264,8 +338,10 @@ void handleWrite(int sock, const char *command)
 
         remaining -= sent;
         offset += sent;
+        recv(sock, buffer, sizeof(buffer), 0);      
     }
     memset(buffer,0, sizeof(buffer));
+    send(sock, "bruh\0", 5, 0);
 
     // Receive confirmation
     recv_size = recv(sock, buffer, sizeof(buffer), 0);
@@ -397,6 +473,14 @@ int main()
 
     printf("Connected to server at %s:%d\n", SERVER_IP, 8081);
     displayHelp();
+
+    initializeAckSocket();
+    // Create a thread to listen for ACKs
+    if (pthread_create(&ack_thread, NULL, ackReceiver, NULL) != 0)
+    {
+        perror("Failed to create thread for ACK reception");
+        return -1;
+    }
 
     char command[MAX_BUFFER_SIZE];
 

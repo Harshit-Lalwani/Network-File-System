@@ -111,6 +111,132 @@ Node *receiveNodeChain(int sock)
 
     return head;
 }
+
+void *ackListener(void *arg)
+{
+    int ns_sock, client_sock;
+    struct sockaddr_in ns_addr, client_addr;
+    char buffer[1024];
+    socklen_t addr_len = sizeof(client_addr);
+    char clientIP[INET_ADDRSTRLEN];
+    int clientPort;
+
+    // Create socket for receiving ACKs from the storage server
+    ns_sock = socket(AF_INET, SOCK_STREAM, 0);
+    if (ns_sock < 0)
+    {
+        perror("Socket creation failed");
+        return NULL;
+    }
+
+    ns_addr.sin_family = AF_INET;
+    ns_addr.sin_port = htons(ACK_PORT);
+    ns_addr.sin_addr.s_addr = INADDR_ANY;
+
+    if (bind(ns_sock, (struct sockaddr *)&ns_addr, sizeof(ns_addr)) < 0)
+    {
+        perror("Binding failed");
+        close(ns_sock);
+        return NULL;
+    }
+
+    if (listen(ns_sock, 5) < 0)
+    {
+        perror("Listen failed");
+        close(ns_sock);
+        return NULL;
+    }
+
+    printf("Naming Server is listening for ACKs on port %d...\n", ACK_PORT);
+
+    while (1)
+    {
+        client_sock = accept(ns_sock, (struct sockaddr *)&client_addr, &addr_len);
+        if (client_sock < 0)
+        {
+            perror("Client accept failed");
+            continue;
+        }
+        memset(buffer, 0 , sizeof(buffer));
+        // Receive ACK from the storage server
+        ssize_t recv_size = recv(client_sock, buffer, sizeof(buffer) - 1, 0);
+        if (recv_size > 0)
+        {
+            buffer[recv_size] = '\0'; // Null-terminate the received string
+
+            // Parse the acknowledgment message to extract the client IP and port
+            if (sscanf(buffer,
+                       "Acknowledgment from Storage Server:\nClient ID: %*d\nClient IP: %15s\nClient Port: %d",
+                       clientIP, &clientPort) == 2)
+            {
+                printf("Received ACK: %s\n", buffer);
+                printf("Extracted Client IP: %s, Client Port: %d\n", clientIP, clientPort);
+
+                // Forward the acknowledgment to the correct client
+                forwardAckToClient(clientIP, clientPort, buffer);
+            }
+            else
+            {
+                fprintf(stderr, "Failed to parse client details from acknowledgment: %s\n", buffer);
+            }
+        }
+        else
+        {
+            perror("Failed to receive acknowledgment");
+        }
+
+        // Close the client socket after processing
+        shutdown(client_sock, SHUT_WR);
+        close(client_sock);
+    }
+
+    close(ns_sock);
+    return NULL;
+}
+
+void forwardAckToClient(const char *clientIP, int clientPort, const char *ack_message)
+{
+    int client_sock;
+    struct sockaddr_in client_addr;
+
+    // Setup client address based on parsed IP and port
+    client_addr.sin_family = AF_INET;
+    client_addr.sin_port = htons(ACK_RECEIVE_PORT);
+
+    if (inet_pton(AF_INET, clientIP, &client_addr.sin_addr) <= 0)
+    {
+        fprintf(stderr, "Invalid client IP address: %s\n", clientIP);
+        return;
+    }
+
+    client_sock = socket(AF_INET, SOCK_STREAM, 0);
+    if (client_sock < 0)
+    {
+        perror("Client socket creation failed");
+        return;
+    }
+
+    // Connect to the client
+    if (connect(client_sock, (struct sockaddr *)&client_addr, sizeof(client_addr)) < 0)
+    {
+        perror("Connection to client failed");
+        close(client_sock);
+        return;
+    }
+
+    // Send the acknowledgment to the client
+    if (send(client_sock, ack_message, strlen(ack_message), 0) < 0)
+    {
+        perror("Failed to send acknowledgment to client");
+    }
+    else
+    {
+        printf("Acknowledgment forwarded to client %s:%d\n", clientIP, clientPort);
+    }
+
+    close(client_sock);
+}
+
 void recursiveList(Node *node, const char *current_path, char *response, int *response_offset, size_t response_size)
 {
     if (!node)

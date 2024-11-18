@@ -57,7 +57,7 @@ ssize_t readFileChunk(Node *node, char *buffer, size_t size, off_t offset)
 // Helper function to write file in chunks
 ssize_t writeFileChunk(Node *node, const char *buffer, size_t size, off_t offset)
 {
-    int fd = open(node->dataLocation, O_WRONLY);
+    int fd = open(node->dataLocation, O_WRONLY | O_APPEND);
     if (fd < 0)
         return -1;
 
@@ -88,6 +88,169 @@ int min(int a, int b)
     return b;
 }
 
+void sendAckToNamingServer(const char *message, int clientId, const char *fileName, const char *clientIP, int clientPort)
+{
+    int ack_socket;
+    struct sockaddr_in naming_server_addr;
+    const int naming_server_port = ACK_PORT; // Dedicated port for async write acknowledgments
+
+    // Create a socket
+    ack_socket = socket(AF_INET, SOCK_STREAM, 0);
+    if (ack_socket < 0)
+    {
+        perror("Socket creation failed");
+        return;
+    }
+
+    // Set up the naming server address
+    memset(&naming_server_addr, 0, sizeof(naming_server_addr));
+    naming_server_addr.sin_family = AF_INET;
+    naming_server_addr.sin_port = htons(naming_server_port);
+
+    // Convert IP address to binary form
+    if (inet_pton(AF_INET, "127.0.0.1", &naming_server_addr.sin_addr) <= 0)
+    {
+        perror("Invalid address or address not supported");
+        close(ack_socket);
+        return;
+    }
+
+    // Connect to the naming server
+    if (connect(ack_socket, (struct sockaddr *)&naming_server_addr, sizeof(naming_server_addr)) < 0)
+    {
+        perror("Connection to naming server failed");
+        close(ack_socket);
+        return;
+    }
+
+    // Prepare the acknowledgment message
+    char ack_message[512];
+    snprintf(ack_message, sizeof(ack_message),
+             "Acknowledgment from Storage Server:\n"
+             "Client ID: %d\nClient IP: %s\nClient Port: %d\n"
+             "File: %s\nMessage: %s\n",
+             clientId, clientIP, clientPort, fileName, message);
+
+    // Send the acknowledgment message
+    if (send(ack_socket, ack_message, strlen(ack_message), 0) < 0)
+    {
+        perror("Failed to send acknowledgment to naming server");
+        close(ack_socket);
+        return;
+    }
+
+    printf("Acknowledgment sent to naming server:\n%s\n", ack_message);
+
+    // Close the socket
+    close(ack_socket);
+}
+
+void *flushAsyncWrites()
+{
+    printf("is the function even called\n");
+    while (1)
+    {
+        // pthread_mutex_lock(&queueMutex);
+
+        // Wait until there are tasks in the queue
+        while (!asyncWriteQueue)
+        {
+            pthread_cond_wait(&queueCondition, &queueMutex);
+        }
+
+        // Process tasks in the queue
+        while (asyncWriteQueue)
+        {
+            AsyncWriteTask *task = asyncWriteQueue;
+            asyncWriteQueue = asyncWriteQueue->next;
+
+            pthread_mutex_unlock(&queueMutex);
+
+            // Simulate writing to persistent storage
+            FILE *file = fopen(task->targetNode->dataLocation, "a");
+            if (file)
+            {
+                fwrite(task->data, 1, task->size, file);
+                fclose(file);
+                printf("Async write completed for file: %s\n", task->targetNode->name);
+                sendAckToNamingServer("Write operation completed successfully for file", task->clientId, task->targetNode->name, task->clientIP, task->clientPort);
+            }
+            else
+            {
+                perror("Error writing to file");
+            }
+
+            // Free the task memory
+            free(task->data);
+            free(task);
+
+            pthread_mutex_lock(&queueMutex);
+        }
+
+        pthread_mutex_unlock(&queueMutex);
+    }
+    return NULL;
+}
+
+int queueAsyncWrite(Node *targetNode, const char *data, size_t size, int client_socket, const char *client_ip, int client_port)
+{
+    // Validate that the node is a file
+    if (targetNode->type != FILE_NODE)
+    {
+        fprintf(stderr, "Error: Target node is not a file.\n");
+        return -1;
+    }
+
+    // Allocate memory for the task
+    AsyncWriteTask *task = malloc(sizeof(AsyncWriteTask));
+    if (!task)
+    {
+        perror("Failed to allocate memory for async write task");
+        return -1;
+    }
+
+    // Initialize the task
+    task->targetNode = targetNode;
+    task->data = malloc(size);
+    if (!task->data)
+    {
+        perror("Failed to allocate memory for task data");
+        free(task);
+        return -1;
+    }
+    memcpy(task->data, data, size);
+    task->size = size;
+    task->clientId = client_socket;
+    strncpy(task->clientIP, client_ip, INET_ADDRSTRLEN);
+    task->clientIP[INET_ADDRSTRLEN - 1] = '\0'; // Ensure null termination
+    task->clientPort = client_port;
+    task->writeStatus = 0;
+    task->next = NULL;
+
+    // Add task to the queue
+    pthread_mutex_lock(&queueMutex);
+    if (!asyncWriteQueue)
+    {
+        asyncWriteQueue = task;
+    }
+    else
+    {
+        AsyncWriteTask *current = asyncWriteQueue;
+        while (current->next)
+        {
+            current = current->next;
+        }
+        current->next = task;
+    }
+
+    // Signal the worker thread
+    printf("Signaling the worker thread\n");
+    pthread_cond_signal(&queueCondition);
+    pthread_mutex_unlock(&queueMutex);
+
+    return 0;
+}
+
 void processCommand_user(Node *root, char *input, int client_socket)
 {
     char path[MAX_PATH_LENGTH];
@@ -97,6 +260,7 @@ void processCommand_user(Node *root, char *input, int client_socket)
     struct stat metadata;
     char command[20];
     char response[1024];
+    int is_sync = 1;
 
     // Clear any leading/trailing whitespace
     char *cmd_start = input;
@@ -175,8 +339,7 @@ void processCommand_user(Node *root, char *input, int client_socket)
             recv(client_socket, buffer, sizeof(buffer), 0);
         }
         else if (cmd == CMD_WRITE)
-        {
-            send(client_socket, "Error: Invalid file size format\n", strlen("Error: Invalid file size format\n"), 0);
+        {send(client_socket, "Error: Invalid file size format\n", strlen("Error: Invalid file size format\n"), 0);
 
             // First receive file size from client
             memset(buffer, 0, sizeof(buffer));
@@ -189,37 +352,108 @@ void processCommand_user(Node *root, char *input, int client_socket)
                      strlen("Error: Invalid file size format\n"), 0);
                 return;
             }
+            if (fileSize >= 1000) // condition that will check whether asynchornous write should happen or not
+            {
+                is_sync = 0;
+            }
+            if (strstr(input, "--SYNC"))
+            {
+                is_sync = 1;
+            }
 
             // Send acknowledgment
             send(client_socket, "READY_TO_RECEIVE\n", strlen("READY_TO_RECEIVE\n"), 0);
-
-            // Receive file content in chunks
-            long totalReceived = 0;
-            while (totalReceived < fileSize)
+            if (is_sync == 1)
             {
-                memset(buffer, 0, sizeof(buffer));
-                ssize_t bytesReceived = recv(client_socket, buffer,
-                                             min(sizeof(buffer), fileSize - totalReceived), 0);
-
-                if (bytesReceived <= 0)
+                printf("synchornous writing is happening\n");
+                // for synchronous writing
+                // Receive file content in chunks
+                long totalReceived = 0;
+                while (totalReceived < fileSize)
                 {
-                    send(client_socket, "Error receiving file data\n",
-                         strlen("Error receiving file data\n"), 0);
-                    return;
-                }
+                    memset(buffer, 0, sizeof(buffer));
+                    ssize_t bytesReceived = recv(client_socket, buffer,
+                                                 min(sizeof(buffer), fileSize - totalReceived), 0);
 
-                if (writeFileChunk(targetNode, buffer, bytesReceived, totalReceived) != bytesReceived)
-                {
-                    send(client_socket, "Error writing to file\n",
-                         strlen("Error writing to file\n"), 0);
-                    return;
+                    if (bytesReceived <= 0)
+                    {
+                        send(client_socket, "Error receiving file data\n",
+                             strlen("Error receiving file data\n"), 0);
+                        return;
+                    }
+
+                    if (writeFileChunk(targetNode, buffer, bytesReceived, totalReceived) != bytesReceived)
+                    {
+                        send(client_socket, "Error writing to file\n",
+                             strlen("Error writing to file\n"), 0);
+                        return;
+                    }
+                    send(client_socket, "ok\0", 3, 0);
+                    totalReceived += bytesReceived;
                 }
-                totalReceived += bytesReceived;
+                recv(client_socket,buffer, sizeof(buffer),0);
+                memset(response, 0 , sizeof(response));
+                snprintf(response, sizeof(response), "Successfully wrote %ld bytes\n", totalReceived);
+                send(client_socket, response, strlen(response), 0);
             }
+            else
+            {
+                printf("Asynchornous writing is happening\n");
+                struct sockaddr_in client_addr;
+                socklen_t addr_len = sizeof(client_addr);
+                if (getpeername(client_socket, (struct sockaddr *)&client_addr, &addr_len) == -1)
+                {
+                    perror("Error retrieving client IP and port");
+                    return;
+                }
+                char client_ip[INET_ADDRSTRLEN];
+                inet_ntop(AF_INET, &client_addr.sin_addr, client_ip, INET_ADDRSTRLEN);
+                int client_port = ntohs(client_addr.sin_port);
+                char *asyncDataBuffer = malloc(fileSize);
 
-            memset(response, 0 , sizeof(response));
-            snprintf(response, sizeof(response), "Successfully wrote %ld bytes\n", totalReceived);
-            send(client_socket, response, strlen(response), 0);
+                if (!asyncDataBuffer)
+                {
+                    send(client_socket, "Error: Memory allocation failed\n",
+                         strlen("Error: Memory allocation failed\n"), 0);
+                    return;
+                }
+
+                long totalReceived = 0;
+                while (totalReceived < fileSize)
+                {
+                    memset(buffer, 0, sizeof(buffer));
+                    ssize_t bytesReceived = recv(client_socket, buffer,
+                                                 min(sizeof(buffer), fileSize - totalReceived), 0);
+
+                    if (bytesReceived <= 0)
+                    {
+                        free(asyncDataBuffer);
+                        send(client_socket, "Error receiving file data\n",
+                             strlen("Error receiving file data\n"), 0);
+                        return;
+                    }
+                    send(client_socket, "ok\0", 3, 0);
+
+                    // Copy data to the async buffer
+                    memcpy(asyncDataBuffer + totalReceived, buffer, bytesReceived);
+                    totalReceived += bytesReceived;
+                }
+                recv(client_socket,buffer, sizeof(buffer),0);
+
+                send(client_socket, "ACK: WRITE REQUEST ACCEPTED\n", strlen("ACK: WRITE REQUEST ACCEPTED\n"), 0);
+
+                // Queue the data for asynchronous write
+                if (queueAsyncWrite(targetNode, asyncDataBuffer, fileSize, client_socket, client_ip, client_port) != 0)
+                {
+                    free(asyncDataBuffer);
+                    send(client_socket, "Error: Failed to queue async write\n", strlen("Error: Failed to queue async write\n"), 0);
+                    return;
+                }
+
+                // Notify the client that the asynchronous write has been queued
+                // snprintf(response, sizeof(response), "Asynchronous write of %ld bytes queued successfully\n", fileSize);
+                // send(client_socket, response, strlen(response), 0);
+            }
         }
         else if (cmd == CMD_META)
         {

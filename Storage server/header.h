@@ -22,6 +22,7 @@
 #define CHUNK_SIZE 100001
 #define BUFFER_SIZE 100001
 #define MAX_BUFFER_SIZE 100001
+#define ACK_PORT 8090
 
 typedef enum
 {
@@ -80,6 +81,21 @@ typedef struct NodeTable
     Node *table[TABLE_SIZE];
 } NodeTable;
 
+typedef struct AsyncWriteTask {
+    Node *targetNode;
+    char *data;
+    size_t size;
+    int clientId; // To identify the client socket
+    char clientIP[INET_ADDRSTRLEN]; // Store client IP
+    int clientPort; // Store client port
+    int writeStatus;
+    struct AsyncWriteTask *next;
+} AsyncWriteTask;
+
+extern AsyncWriteTask *asyncWriteQueue; // The head of the queue
+extern pthread_mutex_t queueMutex;      // Mutex for queue protection
+extern pthread_cond_t queueCondition;   // Condition variable for signaling
+
 unsigned int hash(const char *str);
 NodeTable *createNodeTable();
 Node *createNode(const char *name, NodeType type, Permissions perms, const char *dataLocation);
@@ -101,12 +117,11 @@ void processCommand_user(Node *root, char *input, int client_socket);
 Node *createEmptyNode(Node *parentDir, const char *name, NodeType type);
 int deleteNode(Node *node);
 int copyNode(Node *sourceNode, Node *destDir, const char *newName);
-// ssize_t readFile(Node *fileNode, char *buffer, size_t size);
-// ssize_t writeFile(Node *fileNode, const char *buffer, size_t size);
 int getFileMetadata(Node *fileNode, struct stat *metadata);
 ssize_t streamAudioFile(Node *fileNode, char *buffer, size_t size, off_t offset);
 int copy_directory_recursive(int peer_socket, Node *dir_node, const char *dest_path, int naming_socket);
 void copy_files_to_peer(const char *source_path, const char *dest_path, const char *peer_ip, int peer_port, Node *root, int naming_socket);
 int copy_single_file(int peer_socket, Node *source_node, const char *dest_path, int naming_socket);
 Node *findNode(Node *root, const char *path);
+void *flushAsyncWrites();
 #endif

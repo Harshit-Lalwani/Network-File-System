@@ -1,6 +1,10 @@
 #include "header.h"
 #define PORT 8080
 
+AsyncWriteTask *asyncWriteQueue = NULL;                   // The head of the queue
+pthread_mutex_t queueMutex = PTHREAD_MUTEX_INITIALIZER;   // Mutex for queue protection
+pthread_cond_t queueCondition = PTHREAD_COND_INITIALIZER; // Condition variable for signaling
+
 int sendNodeChain(int sock, Node *node)
 {
     Node *current = node;
@@ -204,6 +208,49 @@ void *namingServerHandler(void *arg)
     return NULL;
 }
 
+void *periodicFlush(void *arg)
+{
+    printf("you");
+    while (1)
+    {
+        printf("ova");
+        pthread_mutex_lock(&queueMutex); // Lock the mutex before checking the queue
+
+        // Wait if the queue is empty
+        while (!asyncWriteQueue)
+        {
+            printf("are uou ");
+            pthread_cond_wait(&queueCondition, &queueMutex); // Wait for a signal if the queue is empty
+        }
+
+        flushAsyncWrites();                // Call to periodically flush the queue
+        pthread_mutex_unlock(&queueMutex); // Unlock the mutex after flushing
+
+        sleep(1); // Sleep for 1 second before the next flush cycle
+    }
+    return NULL;
+}
+pthread_t flushThread;
+
+// Add this to your cleanup code
+void cleanupAsyncWriter()
+{
+    pthread_cancel(flushThread);
+    pthread_mutex_destroy(&queueMutex);
+    pthread_cond_destroy(&queueCondition);
+
+    // Clean up any pending writes
+    pthread_mutex_lock(&queueMutex);
+    while (asyncWriteQueue)
+    {
+        AsyncWriteTask *task = asyncWriteQueue;
+        asyncWriteQueue = asyncWriteQueue->next;
+        free(task->data);
+        free(task);
+    }
+    pthread_mutex_unlock(&queueMutex);
+}
+
 // Main function
 int main()
 {
@@ -284,6 +331,14 @@ int main()
         perror("Listen failed");
         exit(EXIT_FAILURE);
     }
+    if (pthread_create(&flushThread, NULL, periodicFlush, NULL) != 0)
+    {
+        perror("Failed to create flush thread");
+        return 1;
+    }
+
+    // Wait for the flush thread to finish (in this case, it runs indefinitely)
+    pthread_detach(flushThread);
     printf("Storage server is listening for client connections on port %d...\n", PORT+2);
     while (1)
     {

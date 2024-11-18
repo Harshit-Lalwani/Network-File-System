@@ -29,6 +29,10 @@
 #define PATH_SEPARATOR "/"
 #define LOG_FILE "naming_server.log"
 
+#define ACK_RECEIVE_PORT 9091 // Dedicated port for receiving ACKs
+
+#define ACK_PORT 8090 // Port for sending acknowledgment to naming server
+
 typedef enum
 {
     CMD_READ,
@@ -157,4 +161,7 @@ StorageServerList *findStorageServersByPath_List(StorageServerTable *table, cons
 Node *findNode(Node *root, const char *path);
 void recursiveList(Node *node, const char *current_path, char *response, int *response_offset, size_t response_size);
 void copyDirectoryContents(Node *sourceDir, Node *destDir);
+void *ackListener(void *arg);
+void forwardAckToClient(const char *clientIP, int clientPort, const char *ack_message);
+void logEvent(const char *level, const char *ip, int port, const char *message);
 #endif

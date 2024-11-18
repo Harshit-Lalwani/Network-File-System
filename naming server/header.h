@@ -68,6 +68,7 @@ typedef struct Node
     struct Node *parent;
     struct Node *next;
     struct NodeTable *children; 
+    int lock_type; // 0= none, 1 = read, 2 = write
 } Node;
 
 typedef struct StorageServer
@@ -108,27 +109,27 @@ typedef struct StorageServerList
     struct StorageServerList *next;
 } StorageServerList;
 
-typedef struct CacheNode
-{
-    Node *node;
-    char *key;
-    struct CacheNode *prev;
-    struct CacheNode *next;
-} CacheNode;
+// typedef struct CacheNode
+// {
+//     Node *node;
+//     char *key;
+//     struct CacheNode *prev;
+//     struct CacheNode *next;
+// } CacheNode;
 
-typedef struct LRUCache
-{
-    int capacity;
-    int size;
-    CacheNode *head;
-    CacheNode *tail;
-    CacheNode **hashTable;
-} LRUCache;
+// typedef struct LRUCache
+// {
+//     int capacity;
+//     int size;
+//     CacheNode *head;
+//     CacheNode *tail;
+//     CacheNode **hashTable;
+// } LRUCache;
 
-LRUCache *createLRUCache(int capacity);
-void freeLRUCache(LRUCache *cache);
-Node *getLRUCache(LRUCache *cache, const char *key);
-void putLRUCache(LRUCache *cache, const char *key, Node *node);
+// LRUCache *createLRUCache(int capacity);
+// void freeLRUCache(LRUCache *cache);
+// Node *getLRUCache(LRUCache *cache, const char *key);
+// void putLRUCache(LRUCache *cache, const char *key, Node *node);
 unsigned int hash(const char *str);
 NodeTable *createNodeTable();
 Node *createNode(const char *name, NodeType type, Permissions perms, const char *dataLocation);

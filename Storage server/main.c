@@ -254,9 +254,23 @@ void cleanupAsyncWriter()
 // Main function
 int main()
 {
-    Node *root = createNode("/home/divijhmangtani/Downloads", DIRECTORY_NODE, READ | WRITE | EXECUTE, "/home/divijhmangtani/Downloads");
-    traverseAndAdd(root, "/home/divijhmangtani/Downloads");
-    // printFileSystemTree(root,10);
+    Node *root = createNode("/home", DIRECTORY_NODE, READ | WRITE | EXECUTE, "/home");
+    traverseAndAdd(root, "/home");
+
+    // Change lock types for specific test files
+    Node *read_test = searchPath(root, "/testFile/read_test.txt");
+    if (read_test)
+    {
+        read_test->lock_type = 1; // Set read lock
+    }
+
+    Node *write_test = searchPath(root, "/testFile/write_test.txt");
+    if (write_test)
+    {
+        write_test->lock_type = 2; // Set write lock
+    }
+
+    // printFileSystemTree(root, 10);
     int naming_server_sock;
     struct sockaddr_in naming_naming_serv_addr;
     struct sockaddr_in naming_serv_addr;

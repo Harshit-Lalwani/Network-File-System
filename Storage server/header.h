@@ -61,6 +61,7 @@ typedef struct Node
     struct Node *parent;
     struct Node *next;
     struct NodeTable *children; 
+    int lock_type; // 0= none, 1 = read, 2 = write
 } Node;
 
 struct ClientData

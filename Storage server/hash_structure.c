@@ -32,6 +32,7 @@ Node *createNode(const char *name, NodeType type, Permissions perms, const char 
     node->parent = NULL;
     node->next = NULL;
     node->children = (type == DIRECTORY_NODE) ? createNodeTable() : NULL;
+    node->lock_type = 0; // No lock by default
     return node;
 }
 

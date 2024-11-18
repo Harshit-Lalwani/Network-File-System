@@ -1,0 +1,14 @@
+- if a file is deleted, it should also be removed from the cache (or find alternate)
+- If a file is deleted, it shoud be removed from the hash table as well
+
+
+- implement read write restriction
+1. use for copy as well
+2. lock it after relevant operations
+3. unlock it after relevant operations
+4. put lock =0 in initialization
+5. implement for asynch. as well
+
+
+
+files to check: storage/opern.c, operhandler.c and storage/header.h 

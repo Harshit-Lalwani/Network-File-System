@@ -1,7 +1,5 @@
 #include"header.h"
 
-
-
 ssize_t readFile(Node *fileNode, char *buffer, size_t size)
 {
     if (fileNode->type != FILE_NODE)

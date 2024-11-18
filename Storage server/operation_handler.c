@@ -43,6 +43,9 @@ void printUsage()
 
 ssize_t readFileChunk(Node *node, char *buffer, size_t size, off_t offset)
 {
+    printf("lock_type = %d\n", node->lock_type);
+    node->lock_type = 1; // Set read lock
+    printf("lock_type = %d\n", node->lock_type);
     int fd = open(node->dataLocation, O_RDONLY);
     if (fd < 0)
         return -1;
@@ -50,6 +53,8 @@ ssize_t readFileChunk(Node *node, char *buffer, size_t size, off_t offset)
     lseek(fd, offset, SEEK_SET);
     ssize_t bytes = read(fd, buffer, size);
     close(fd);
+    node->lock_type = 0; // Release lock
+    printf("lock_type = %d\n", node->lock_type);
 
     return bytes;
 }
@@ -57,6 +62,9 @@ ssize_t readFileChunk(Node *node, char *buffer, size_t size, off_t offset)
 // Helper function to write file in chunks
 ssize_t writeFileChunk(Node *node, const char *buffer, size_t size, off_t offset)
 {
+    printf("lock_type = %d\n", node->lock_type);
+    node->lock_type = 2; // Set write lock
+    printf("lock_type = %d\n", node->lock_type);
     int fd = open(node->dataLocation, O_WRONLY | O_APPEND);
     if (fd < 0)
         return -1;
@@ -64,6 +72,8 @@ ssize_t writeFileChunk(Node *node, const char *buffer, size_t size, off_t offset
     lseek(fd, offset, SEEK_SET);
     ssize_t bytes = write(fd, buffer, size);
     close(fd);
+    node->lock_type = 0; // Release lock
+    printf("lock_type = %d\n", node->lock_type);
 
     return bytes;
 }
@@ -310,6 +320,14 @@ void processCommand_user(Node *root, char *input, int client_socket)
 
         if (cmd == CMD_READ)
         {
+            printf("read command. lock_type = %d\n", targetNode->lock_type);
+            // Check if the lock is open
+            if (targetNode->lock_type == 2)
+            {
+                snprintf(response, sizeof(response), "Error: File is being written to\n");
+                send(client_socket, response, strlen(response), 0);
+                return;
+            }
             ssize_t bytes;
             off_t offset = 0;
             struct stat st;
@@ -339,7 +357,23 @@ void processCommand_user(Node *root, char *input, int client_socket)
             recv(client_socket, buffer, sizeof(buffer), 0);
         }
         else if (cmd == CMD_WRITE)
-        {send(client_socket, "Error: Invalid file size format\n", strlen("Error: Invalid file size format\n"), 0);
+        {
+            printf("write command. lock_type = %d\n", targetNode->lock_type);
+            // Check if the lock is open
+            if (targetNode->lock_type == 2)
+            {
+                snprintf(response, sizeof(response), "Error: File is being written to\n");
+                send(client_socket, response, strlen(response), 0);
+                return;
+            }
+            // Check if the lock is open
+            if (targetNode->lock_type == 1)
+            {
+                snprintf(response, sizeof(response), "Error: File is being read.\n");
+                send(client_socket, response, strlen(response), 0);
+                return;
+            }
+            send(client_socket, "Error: Invalid file size format\n", strlen("Error: Invalid file size format\n"), 0);
 
             // First receive file size from client
             memset(buffer, 0, sizeof(buffer));

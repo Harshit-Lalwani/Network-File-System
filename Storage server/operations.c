@@ -219,11 +219,18 @@ int copyNode(Node *sourceNode, Node *destDir, const char *newName)
     }
     else
     {
+
+        if (sourceNode->lock_type == 2) // Check if the file is being written to
+        {
+            return 0; // File is being written to, cannot copy
+        }
+
+        sourceNode->lock_type = 1; // read lock
         // Copy file contents
         char buffer[8192];
         int sourceFd = open(sourceNode->dataLocation, O_RDONLY);
         int destFd = open(destPath, O_WRONLY | O_CREAT | O_TRUNC, 0644);
-
+       
         if (sourceFd == -1 || destFd == -1)
         {
             perror("Error opening files for copy");
@@ -231,6 +238,7 @@ int copyNode(Node *sourceNode, Node *destDir, const char *newName)
                 close(sourceFd);
             if (destFd != -1)
                 close(destFd);
+            sourceNode->lock_type = 0; // unlock
             return -1;
         }
 
@@ -242,6 +250,7 @@ int copyNode(Node *sourceNode, Node *destDir, const char *newName)
                 perror("Error writing to destination file");
                 close(sourceFd);
                 close(destFd);
+                sourceNode->lock_type = 0; // unlock
                 return -1;
             }
         }

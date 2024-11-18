@@ -15,7 +15,14 @@ CommandType parseCommand(const char *cmd)
     if (strcasecmp(cmd, "DELETE") == 0)
         return CMD_DELETE;
     if (strcasecmp(cmd, "COPY") == 0)
+    {
+        // printf("heuiewjdn\n");
         return CMD_COPY;
+    }
+    if (strcasecmp(cmd, "FILE_META") == 0)
+        return CMD_FILECOPY;
+    if (strcasecmp(cmd, "CREATE_DIR") == 0)
+        return CMD_DIRCOPY;
     return CMD_UNKNOWN;
 }
 
@@ -74,10 +81,10 @@ void getPermissionsString(int mode, char *permissions, size_t size)
         strncat(permissions, "APPEND ", size - strlen(permissions) - 1);
 }
 
-int min(int a,int b)
+int min(int a, int b)
 {
-    if(a<b)
-    return a;
+    if (a < b)
+        return a;
     return b;
 }
 
@@ -95,22 +102,16 @@ void processCommand_user(Node *root, char *input, int client_socket)
     char *cmd_start = input;
     while (*cmd_start == ' ')
         cmd_start++;
-
-    // Check for empty command
     if (strlen(cmd_start) == 0)
     {
         send(client_socket, "Error: Empty command\n", strlen("Error: Empty command\n"), 0);
         return;
     }
-
-    // Parse the first word as command
     if (sscanf(cmd_start, "%s", command) != 1)
     {
         send(client_socket, "Error reading command\n", strlen("Error reading command\n"), 0);
         return;
     }
-
-    // Move pointer past command
     cmd_start += strlen(command);
     while (*cmd_start == ' ')
         cmd_start++;
@@ -122,8 +123,6 @@ void processCommand_user(Node *root, char *input, int client_socket)
     }
 
     CommandType cmd = parseCommand(command);
-
-    // Handle different command types
     switch (cmd)
     {
     case CMD_READ:
@@ -146,11 +145,8 @@ void processCommand_user(Node *root, char *input, int client_socket)
 
         if (cmd == CMD_READ)
         {
-            // Read file in chunks and send directly to client
             ssize_t bytes;
             off_t offset = 0;
-
-            // First send file size
             struct stat st;
             if (getFileMetadata(targetNode, &st) == 0)
             {
@@ -162,7 +158,7 @@ void processCommand_user(Node *root, char *input, int client_socket)
 
             while ((bytes = readFileChunk(targetNode, buffer, sizeof(buffer), offset)) > 0)
             {
-                printf("%s\n",buffer);
+                // printf("%s\n", buffer);
                 send(client_socket, buffer, bytes, 0);
                 recv(client_socket, buffer, sizeof(buffer), 0);
                 offset += bytes;
@@ -259,15 +255,77 @@ void processCommand_user(Node *root, char *input, int client_socket)
                     break;
                 }
                 recv(client_socket, buffer, sizeof(buffer), 0);
-                memset(buffer,0,sizeof(buffer));
+                memset(buffer, 0, sizeof(buffer));
                 offset += bytes;
                 chunks++;
-                usleep(100000); 
+                usleep(100000);
             }
             send(client_socket, "END_STREAM\n", strlen("END_STREAM\n"), 0);
             recv(client_socket, buffer, sizeof(buffer), 0);
         }
         break;
+    case CMD_FILECOPY:
+        char name[1024];
+        int permissions;
+        if (sscanf(cmd_start, "%s %s %d", path, name, &permissions) != 3)
+        {
+            send(client_socket, "Error: Path required\n", strlen("Error: Path required\n"), 0);
+            return;
+        }
+        char *lastSlash = strrchr(path, '/');
+        if (!lastSlash)
+        {
+            snprintf(response, sizeof(response), "Error: Invalid path format");
+            send(client_socket, response, strlen(response), 0);
+            memset(response, 0, sizeof(response));
+            return;
+        }
+        *lastSlash = '\0';
+        // char *name = lastSlash + 1;
+        Node *parentDir = findNode(root, path);
+        *lastSlash = '/';
+
+        if (!parentDir)
+        {
+            snprintf(response, sizeof(response), "Error: Parent directory not found");
+            send(client_socket, response, strlen(response), 0);
+            memset(response, 0, sizeof(response));
+            return;
+        }
+
+        NodeType type = FILE_NODE;
+        if (createEmptyNode(parentDir, name, type))
+        {
+            snprintf(response, sizeof(response), "CREATE DONE");
+            send(client_socket, response, strlen(response), 0);
+            memset(response, 0, sizeof(response));
+            memset(buffer, 0, sizeof(buffer));
+            size_t bytes_received;
+            int totalReceived = 0;
+            char node_path[1024];
+            snprintf(node_path,sizeof(node_path),"%s/%s",path,name);
+            Node* target=findNode(root,node_path);
+            while ((bytes_received = recv(client_socket, buffer, sizeof(buffer), 0)) > 0)
+            {
+                send(client_socket, command, strlen(command), 0);
+                // printf("%d\n",bytes_received);
+                // size+=bytes_received;
+                buffer[bytes_received] = '\0';
+                if (strncmp(buffer, "END_OF_FILE\n", 12) == 0)
+                    break;
+                writeFileChunk(target, buffer, bytes_received, totalReceived);
+                memset(buffer, 0, sizeof(buffer));
+            }
+            // return;
+        }
+        else
+        {
+            snprintf(response, sizeof(response), "Error creating node");
+            send(client_socket, response, strlen(response), 0);
+            memset(response, 0, sizeof(response));
+            return;
+        }
+
     case CMD_UNKNOWN:
         send(client_socket, "Unknown command: %s\nUsage: READ|WRITE|META|STREAM <args>\n", strlen("Unknown command: %s\nUsage: READ|WRITE|META|STREAM <args>\n"), 0);
         break;
@@ -284,28 +342,20 @@ void processCommand_namingServer(Node *root, char *input, int client_socket)
     char command[20];
     char response[100001];
     printf("helllo\n");
-
-    // Clear any leading/trailing whitespace
     char *cmd_start = input;
     while (*cmd_start == ' ')
         cmd_start++;
-
-    // Check for empty command
     if (strlen(cmd_start) == 0)
     {
         printf("hey\n");
         send(client_socket, "Error: Empty command\n", strlen("Error: Empty command\n"), 0);
         return;
     }
-
-    // Parse the first word as command
     if (sscanf(cmd_start, "%s", command) != 1)
     {
         send(client_socket, "Error reading command\n", strlen("Error reading command\n"), 0);
         return;
     }
-
-    // Move pointer past command
     cmd_start += strlen(command);
     while (*cmd_start == ' ')
         cmd_start++;
@@ -315,28 +365,28 @@ void processCommand_namingServer(Node *root, char *input, int client_socket)
         send(client_socket, "Exiting...\n", strlen("Exiting...\n"), 0);
         return;
     }
-
+    printf("%s\n", command);
     CommandType cmd = parseCommand(command);
+    // printf("%d\n",cmd);
     int temp;
-    // Handle different command types
     switch (cmd)
     {
     case CMD_CREATE:
-        if (sscanf(cmd_start, "%s %d %s", typeStr,&temp, path) != 3)
+        if (sscanf(cmd_start, "%s %d %s", typeStr, &temp, path) != 3)
         {
             snprintf(response, sizeof(response), "Error: Type and path required");
             send(client_socket, response, strlen(response), 0);
+            memset(response, 0, sizeof(response));
             return;
         }
-
         char *lastSlash = strrchr(path, '/');
         if (!lastSlash)
         {
             snprintf(response, sizeof(response), "Error: Invalid path format");
             send(client_socket, response, strlen(response), 0);
+            memset(response, 0, sizeof(response));
             return;
         }
-
         *lastSlash = '\0';
         char *name = lastSlash + 1;
         Node *parentDir = searchPath(root, path);
@@ -346,6 +396,7 @@ void processCommand_namingServer(Node *root, char *input, int client_socket)
         {
             snprintf(response, sizeof(response), "Error: Parent directory not found");
             send(client_socket, response, strlen(response), 0);
+            memset(response, 0, sizeof(response));
             return;
         }
 
@@ -354,60 +405,45 @@ void processCommand_namingServer(Node *root, char *input, int client_socket)
         {
             snprintf(response, sizeof(response), "CREATE DONE");
             send(client_socket, response, strlen(response), 0);
-            
-            return ;
+            memset(response, 0, sizeof(response));
+            return;
         }
         else
         {
             snprintf(response, sizeof(response), "Error creating node");
             send(client_socket, response, strlen(response), 0);
+            memset(response, 0, sizeof(response));
         }
         break;
 
     case CMD_COPY:
-        if (sscanf(cmd_start, "%s %s", path, secondPath) != 2)
+        sscanf(cmd_start, "%s %s", path, secondPath);
+        snprintf(buffer, sizeof(buffer), "ACknowledgement");
+        ssize_t bytes_sent = send(client_socket, buffer, strlen(buffer), 0);
+        printf("Bytes sent: %zd\n", bytes_sent);
+        fflush(stdout);
+
+        if (bytes_sent <= 0)
         {
-            snprintf(response, sizeof(response), "Error: Source and destination paths required");
-            send(client_socket, response, strlen(response), 0);
+            perror("Failed to send COPY command to source");
+            fflush(stdout);
             return;
         }
-
-        Node *sourceNode = searchPath(root, path);
-        if (!sourceNode)
+        printf("sent %s\n", buffer);
+        fflush(stdout);
+        ssize_t bytes_received = recv(client_socket, buffer, sizeof(buffer) - 1, 0);
+        if (bytes_received <= 0)
+            break;
+        buffer[bytes_received] = '\0';
+        char peer_ip[16];
+        int peer_port;
+        int flag = 0;
+        if (strncmp(buffer, "SOURCE SERVER_INFO", 18) == 0)
         {
-            snprintf(response, sizeof(response), "Error: Source path not found");
-            send(client_socket, response, strlen(response), 0);
-            return;
-        }
-
-        lastSlash = strrchr(secondPath, '/');
-        if (!lastSlash)
-        {
-            snprintf(response, sizeof(response), "Error: Invalid destination path format");
-            send(client_socket, response, strlen(response), 0);
-            return;
-        }
-
-        *lastSlash = '\0';
-        name = lastSlash + 1;
-        Node *destDir = searchPath(root, secondPath);
-
-        if (!destDir)
-        {
-            snprintf(response, sizeof(response), "Error: Destination directory not found");
-            send(client_socket, response, strlen(response), 0);
-            return;
-        }
-
-        if (copyNode(sourceNode, destDir, name) == 0)
-        {
-            snprintf(response, sizeof(response), "Successfully copied");
-            send(client_socket, response, strlen(response), 0);
-        }
-        else
-        {
-            snprintf(response, sizeof(response), "Error copying node");
-            send(client_socket, response, strlen(response), 0);
+            printf("source\n");
+            sscanf(buffer, "SOURCE SERVER_INFO %s %d", peer_ip, &peer_port);
+            copy_files_to_peer(path, secondPath, peer_ip, peer_port, root, client_socket);
+            flag = 1;
         }
         break;
 
@@ -416,6 +452,7 @@ void processCommand_namingServer(Node *root, char *input, int client_socket)
         {
             snprintf(response, sizeof(response), "Error: Path required");
             send(client_socket, response, strlen(response), 0);
+            memset(response, 0, sizeof(response));
             return;
         }
         Node *nodeToDelete = searchPath(root, path);
@@ -423,23 +460,27 @@ void processCommand_namingServer(Node *root, char *input, int client_socket)
         {
             snprintf(response, sizeof(response), "Error: Path not found");
             send(client_socket, response, strlen(response), 0);
+            memset(response, 0, sizeof(response));
             return;
         }
         if (deleteNode(nodeToDelete) == 0)
         {
             snprintf(response, sizeof(response), "DELETE DONE");
             send(client_socket, response, strlen(response), 0);
+            memset(response, 0, sizeof(response));
         }
         else
         {
             snprintf(response, sizeof(response), "Error deleting node");
             send(client_socket, response, strlen(response), 0);
+            memset(response, 0, sizeof(response));
         }
         break;
 
     case CMD_UNKNOWN:
         snprintf(response, sizeof(response), "Unknown command: %s\nUsage:CREATE|COPY|DELETE <args>", command);
         send(client_socket, response, strlen(response), 0);
+        memset(response, 0, sizeof(response));
         break;
     }
 }

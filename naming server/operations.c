@@ -176,35 +176,24 @@ int deleteNode(Node *node)
         return -1;
     }
 
-    // For directories, first check if empty (except for . and ..)
-    if (node->type == DIRECTORY_NODE)
+    // Recursively delete all children if the node is a directory
+    if (node->type == DIRECTORY_NODE && node->children)
     {
-        DIR *dir = opendir(node->dataLocation);
-        if (!dir)
+        for (int i = 0; i < TABLE_SIZE; i++)
         {
-            perror("Error opening directory");
-            return -1;
-        }
-
-        struct dirent *entry;
-        int isEmpty = 1;
-        while ((entry = readdir(dir)) != NULL)
-        {
-            if (strcmp(entry->d_name, ".") != 0 &&
-                strcmp(entry->d_name, "..") != 0)
+            Node *child = node->children->table[i];
+            while (child)
             {
-                isEmpty = 0;
-                break;
+                Node *next = child->next;
+                deleteNode(child);
+                child = next;
             }
         }
-        closedir(dir);
+    }
 
-        if (!isEmpty)
-        {
-            printf("Error: Directory not empty\n");
-            return -1;
-        }
-
+    // Remove the physical file or directory
+    if (node->type == DIRECTORY_NODE)
+    {
         if (rmdir(node->dataLocation) != 0)
         {
             perror("Error deleting directory");

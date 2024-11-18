@@ -1,6 +1,4 @@
-#include"header.h"
-
-
+#include "header.h"
 
 // ssize_t readFile(Node *fileNode, char *buffer, size_t size)
 // {
@@ -176,35 +174,24 @@ int deleteNode(Node *node)
         return -1;
     }
 
-    // For directories, first check if empty (except for . and ..)
-    if (node->type == DIRECTORY_NODE)
+    // Recursively delete all children if the node is a directory
+    if (node->type == DIRECTORY_NODE && node->children)
     {
-        DIR *dir = opendir(node->dataLocation);
-        if (!dir)
+        for (int i = 0; i < TABLE_SIZE; i++)
         {
-            perror("Error opening directory");
-            return -1;
-        }
-
-        struct dirent *entry;
-        int isEmpty = 1;
-        while ((entry = readdir(dir)) != NULL)
-        {
-            if (strcmp(entry->d_name, ".") != 0 &&
-                strcmp(entry->d_name, "..") != 0)
+            Node *child = node->children->table[i];
+            while (child)
             {
-                isEmpty = 0;
-                break;
+                Node *next = child->next;
+                deleteNode(child);
+                child = next;
             }
         }
-        closedir(dir);
+    }
 
-        if (!isEmpty)
-        {
-            printf("Error: Directory not empty\n");
-            return -1;
-        }
-
+    // Remove the physical file or directory
+    if (node->type == DIRECTORY_NODE)
+    {
         if (rmdir(node->dataLocation) != 0)
         {
             perror("Error deleting directory");
@@ -341,4 +328,245 @@ int copyNode(Node *sourceNode, Node *destDir, const char *newName)
     }
 
     return 0;
+}
+
+int connectToServer(const char *ip, int port)
+{
+    int sock = socket(AF_INET, SOCK_STREAM, 0);
+    if (sock < 0)
+    {
+        perror("Socket creation failed");
+        return -1;
+    }
+
+    struct sockaddr_in server_addr;
+    memset(&server_addr, 0, sizeof(server_addr));
+    server_addr.sin_family = AF_INET;
+    server_addr.sin_port = htons(port);
+
+    if (inet_pton(AF_INET, ip, &server_addr.sin_addr) <= 0)
+    {
+        perror("Invalid address");
+        close(sock);
+        return -1;
+    }
+
+    if (connect(sock, (struct sockaddr *)&server_addr, sizeof(server_addr)) < 0)
+    {
+        perror("Connection failed");
+        close(sock);
+        return -1;
+    }
+
+    return sock;
+}
+Node *findNode(Node *root, const char *path)
+{
+    if (!root || !path || strlen(path) == 0)
+    {
+        printf("Error: Invalid root or path.\n");
+        return NULL;
+    }
+
+    // Handle root path case
+    if (strcmp(path, "/") == 0)
+    {
+        return root;
+    }
+
+    // Tokenize the path using the path separator
+    char *pathCopy = strdup(path); // Make a mutable copy of the path
+    char *token = strtok(pathCopy, "/");
+    Node *current = root;
+
+    while (token != NULL)
+    {
+        // Traverse the children of the current node
+        NodeTable *childrenTable = current->children;
+        if (!childrenTable)
+        {
+            printf("Error: Path component '%s' not found (no children).\n", token);
+            free(pathCopy);
+            return NULL;
+        }
+
+        Node *child = NULL;
+        for (int i = 0; i < TABLE_SIZE; i++)
+        {
+            child = childrenTable->table[i];
+            while (child != NULL)
+            {
+                if (strcmp(child->name, token) == 0)
+                {
+                    break;
+                }
+                child = child->next;
+            }
+            if (child)
+            {
+                break;
+            }
+        }
+
+        if (!child)
+        {
+            printf("Error: Path component '%s' not found.\n", token);
+            free(pathCopy);
+            return NULL;
+        }
+
+        // Move to the next level
+        current = child;
+        token = strtok(NULL, "/");
+    }
+
+    free(pathCopy);
+    return current;
+}
+
+void copy_files_to_peer(const char *source_path, const char *dest_path, const char *peer_ip, int peer_port, Node *root, int naming_socket)
+{
+    Node *source_node = findNode(root, source_path);
+    int peer_socket = connectToServer(peer_ip, peer_port);
+    if (peer_socket < 0)
+        return;
+
+    if (source_node->type == FILE_NODE)
+    {
+        copy_single_file(peer_socket, source_node, dest_path, naming_socket);
+    }
+    else if (source_node->type == DIRECTORY_NODE)
+    {
+        copy_directory_recursive(peer_socket, source_node, dest_path);
+    }
+
+    close(peer_socket);
+}
+
+void copy_single_file(int peer_socket, Node *source_node, const char *dest_path, int naming_socket)
+{
+    // Send file metadata
+    char metadata[MAX_BUFFER_SIZE];
+    snprintf(metadata, sizeof(metadata), "FILE_META %s %s %d", dest_path, source_node->name, source_node->permissions);
+    send(peer_socket, metadata, strlen(metadata), 0);
+    char respond[1024];
+    recv(peer_socket, respond, sizeof(respond), 0);
+    printf("%s\n", respond);
+    if (strncmp(respond, "CREATE DONE", 11) == 0)
+    {
+        FILE *fp = fopen(source_node->dataLocation, "rb");
+        if (!fp)
+            return;
+
+        char buffer[100001];
+        size_t bytes_read;
+        char com[20];
+        while ((bytes_read = fread(buffer, 1, sizeof(buffer), fp)) > 0)
+        {
+            printf("%s\n", buffer);
+            send(peer_socket, buffer, bytes_read, 0);
+            recv(peer_socket, com, sizeof(com), 0);
+            memset(buffer, 0, sizeof(buffer));
+        }
+        fclose(fp);
+        send(peer_socket, "END_OF_FILE\n", strlen("END_OF_FILE\n"), 0);
+        recv(peer_socket, buffer, sizeof(buffer), 0);
+        send(naming_socket, "FILE COPY DONE", strlen("FILE COPY DONE"), 0);
+    }
+    else
+    {
+        send(naming_socket, respond, strlen(respond), 0);
+    }
+}
+
+void copy_directory_recursive(int peer_socket, Node *dir_node, const char *dest_path)
+{
+    // Create directory on peer
+    char dir_cmd[MAX_BUFFER_SIZE];
+    snprintf(dir_cmd, sizeof(dir_cmd), "CREATE_DIR %s %s %d",
+             dest_path, dir_node->name, dir_node->permissions);
+    send(peer_socket, dir_cmd, strlen(dir_cmd), 0);
+
+    // Recursively copy all children
+    for (int i = 0; i < TABLE_SIZE; i++)
+    {
+        Node *child = dir_node->children->table[i];
+        while (child)
+        {
+            char new_dest_path[MAX_PATH_LENGTH];
+            snprintf(new_dest_path, sizeof(new_dest_path), "%s/%s",
+                     dest_path, dir_node->name);
+
+            if (child->type == FILE_NODE)
+            {
+                // copy_single_file(peer_socket, child, new_dest_path);
+            }
+            else
+            {
+                copy_directory_recursive(peer_socket, child, new_dest_path);
+            }
+            child = child->next;
+        }
+    }
+}
+
+// Peer storage server receiving side
+void handle_peer_copy(int peer_socket)
+{
+    char buffer[MAX_BUFFER_SIZE];
+    while (1)
+    {
+        ssize_t bytes_received = recv(peer_socket, buffer, sizeof(buffer) - 1, 0);
+        if (bytes_received <= 0)
+            break;
+        buffer[bytes_received] = '\0';
+
+        if (strncmp(buffer, "FILE_META", 9) == 0)
+        {
+            char path[MAX_PATH_LENGTH], filename[MAX_PATH_LENGTH];
+            int perms;
+            sscanf(buffer, "FILE_META %s %s %d", path, filename, &perms);
+
+            // Create parent directories if needed
+            // Node *parent = ensure_parent_directories(root, path);
+            // if (!parent)
+            continue;
+
+            // Create new file node and receive content
+            char file_path[MAX_PATH_LENGTH];
+            // snprintf(file_path, sizeof(file_path), "%s/%s", DATA_DIR, filename);
+            // addFile(parent, filename, perms, file_path);
+
+            // Receive and write file content
+            receive_file_content(peer_socket, file_path);
+        }
+        else if (strncmp(buffer, "CREATE_DIR", 10) == 0)
+        {
+            char path[MAX_PATH_LENGTH], dirname[MAX_PATH_LENGTH];
+            int perms;
+            sscanf(buffer, "CREATE_DIR %s %s %d", path, dirname, &perms);
+
+            // Node *parent = ensure_parent_directories(root, path);
+            // if (parent)
+            // {
+            //     addDirectory(parent, dirname, perms);
+            // }
+        }
+    }
+}
+
+// Helper function to receive file content
+void receive_file_content(int peer_socket, const char *file_path)
+{
+    FILE *fp = fopen(file_path, "wb");
+    if (!fp)
+        return;
+
+    char buffer[8192];
+    ssize_t bytes_received;
+    while ((bytes_received = recv(peer_socket, buffer, sizeof(buffer), 0)) > 0)
+    {
+        fwrite(buffer, 1, bytes_received, fp);
+    }
+    fclose(fp);
 }

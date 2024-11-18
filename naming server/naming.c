@@ -1,20 +1,29 @@
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <sys/socket.h>
-#include <netinet/in.h>
-#include <arpa/inet.h>
-#include <unistd.h>
-#include <pthread.h>
-#include <ctype.h>
 #include "header.h"
 
-#define MAX_CLIENTS 10
-#define STORAGE_PORT 8080
-#define NAMING_PORT 8081
-// #define CLIENT_PORT 8082
-#define MAX_BUFFER_SIZE 100001
+void logEvent(const char *level, const char *ip, int port, const char *message)
+{
+    FILE *log_file = fopen(LOG_FILE, "a");
+    if (!log_file)
+    {
+        perror("Failed to open log file");
+        return;
+    }
 
+    // Get current timestamp
+    time_t now = time(NULL);
+    struct tm *local_time = localtime(&now);
+    char timestamp[20];
+    strftime(timestamp, sizeof(timestamp), "%Y-%m-%d %H:%M:%S", local_time);
+
+    // Use "N/A" if IP is NULL
+    const char *log_ip = (ip != NULL) ? ip : "N/A";
+
+    // Write log entry
+    fprintf(log_file, "[%s] [%s] [IP: %s:%d] %s\n", timestamp, level, log_ip, port, message);
+    printf("[%s] [%s] [IP: %s:%d] %s\n", timestamp, level, log_ip, port, message); // Optional console output
+
+    fclose(log_file);
+}
 StorageServerTable *createStorageServerTable()
 {
     StorageServerTable *table = (StorageServerTable *)malloc(sizeof(StorageServerTable));
@@ -148,7 +157,18 @@ void *storageServerHandler(void *arg)
     return NULL;
 }
 
-// Function to handle client requests
+void getFileName(const char *path, char **filename)
+{
+    if (!path || !filename)
+    {
+        printf("Error: Invalid path or filename pointer.\n");
+        return;
+    }
+
+    const char *lastSlash = strrchr(path, '/');
+    *filename = lastSlash ? (char *)(lastSlash + 1) : (char *)path;
+}
+
 void *clientHandler(void *arg)
 {
     struct
@@ -156,7 +176,6 @@ void *clientHandler(void *arg)
         int socket;
         StorageServerTable *table;
     } *args = arg;
-
     int client_socket = args->socket;
     StorageServerTable *table = args->table;
     char buffer[MAX_BUFFER_SIZE];
@@ -164,34 +183,28 @@ void *clientHandler(void *arg)
     char path[MAX_PATH_LENGTH];
     char dest_path[MAX_PATH_LENGTH];
     ssize_t bytes_received;
-
     while (1)
     {
         bytes_received = recv(client_socket, buffer, sizeof(buffer), 0);
         buffer[bytes_received] = '\0';
-        // Parse command
         if (sscanf(buffer, "%s %s", command, path) < 1)
         {
             send(client_socket, "Error: Invalid command format\n",
                  strlen("Error: Invalid command format\n"), 0);
             continue;
         }
-
-        // Convert command to uppercase for comparison
         for (int i = 0; command[i]; i++)
         {
             command[i] = toupper(command[i]);
         }
         printf("%s \n", path);
-        // Check if path exists in the storage server's root
-
         if (strcmp(command, "READ") == 0 || strcmp(command, "WRITE") == 0 || strcmp(command, "META") == 0 || strcmp(command, "STREAM") == 0)
         {
             StorageServer *server = findStorageServerByPath(table, path);
-
+            printf("%s\n", server->root->name);
             if (!server)
             {
-                const char *error = "Path not found in any storage server";
+                const char *error = "Path not found in any storage server ";
                 send(client_socket, error, strlen(error), 0);
                 continue;
             }
@@ -209,10 +222,101 @@ void *clientHandler(void *arg)
                 send(client_socket, error, strlen(error), 0);
             }
             pthread_mutex_unlock(&server->lock);
-            // snprintf(response, sizeof(response), "StorageServer: %s : %d",
-            //          storage_info->ip, storage_info->client_port);
-            // send(client_socket, response, strlen(response), 0);
         }
+        else if (sscanf(buffer, "LIST %s", path) == 1 || strcmp(buffer, "LIST") == 0)
+        {
+            char response[100001];
+            int response_offset = 0;
+            if (strcmp(buffer, "LIST") == 0)
+            {
+                for (int i = 0; i < TABLE_SIZE; i++)
+                {
+                    pthread_mutex_lock(&table->locks[i]);
+                    StorageServer *server = table->table[i];
+                    while (server)
+                    {
+                        if (server->active)
+                        {
+                            // Traverse the entire structure of this server
+                            recursiveList(server->root, "", response, &response_offset, sizeof(response));
+                        }
+                        server = server->next;
+                    }
+                    pthread_mutex_unlock(&table->locks[i]);
+                }
+                // Send the response with all the matching servers
+                if (response_offset > 0)
+                {
+                    send(client_socket, response, response_offset, 0); // Send the listing response to the client
+                }
+                else
+                {
+                    const char *error = "No files or directories found in the specified path across all servers.";
+                    send(client_socket, error, strlen(error), 0);
+                }
+            }
+            else
+            {
+                StorageServerList *servers = findStorageServersByPath_List(table, path);
+                if (!servers)
+                {
+                    const char *error = "Path not found in any storage server";
+                    send(client_socket, error, strlen(error), 0);
+                    continue;
+                }
+
+                // Iterate over all matching servers
+                for (StorageServerList *server_list = servers; server_list != NULL; server_list = server_list->next)
+                {
+                    StorageServer *server = server_list->server;
+                    pthread_mutex_lock(&server->lock);
+                    if (server->active)
+                    {
+                        // The path has been found in this server, now find the specified path inside the server
+                        Node *target_node = searchPath(server->root, path);
+                        if (!target_node)
+                        {
+                            const char *error = "Specified path not found in the storage server";
+                            send(client_socket, error, strlen(error), 0);
+                            pthread_mutex_unlock(&server->lock);
+                            continue;
+                        }
+                        else
+                        {
+                            recursiveList(target_node, path, response, &response_offset, sizeof(response));
+                        }
+
+                        // If the path is a directory, list its immediate children
+                    }
+                    else
+                    {
+                        const char *error = "Storage server is not active";
+                        send(client_socket, error, strlen(error), 0);
+                    }
+                    pthread_mutex_unlock(&server->lock);
+                }
+
+                // Send the response with all the matching servers
+                if (response_offset > 0)
+                {
+                    send(client_socket, response, response_offset, 0); // Send the listing response to the client
+                }
+                else
+                {
+                    const char *error = "No files or directories found in the specified path across all servers.";
+                    send(client_socket, error, strlen(error), 0);
+                }
+
+                // Free the list of servers
+                while (servers)
+                {
+                    StorageServerList *tmp = servers;
+                    servers = servers->next;
+                    free(tmp);
+                }
+            }
+        }
+
         else if (strcmp(command, "CREATE") == 0 || strcmp(command, "DELETE") == 0 || strcmp(command, "COPY") == 0)
         {
             // send(client_socket,command,sizeof(command),0);
@@ -220,24 +324,15 @@ void *clientHandler(void *arg)
             int ss_num = -1;
             if (sscanf(buffer, "CREATE %s %d %s", type, &ss_num, path) == 3)
             {
-                // StorageServer *server = findStorageServerByPath(table, path);
-                // if (!server)
-                // {
-                //     const char *error = "Path not found in any storage server";
-                //     send(client_socket, error, strlen(error), 0);
-                //     continue;
-                // }
-                // else
-                // {
                 if (strcmp(type, "FILE") == 0 || strcmp(type, "DIR") == 0)
                 {
-                    printf("%d \n",ss_num);
+                    printf("%d \n", ss_num);
                     StorageServer *server;
-                    for (int i = 0; i < TABLE_SIZE && ss_num!=0; i++)
+                    for (int i = 0; i < TABLE_SIZE && ss_num != 0; i++)
                     {
                         pthread_mutex_lock(&table->locks[i]);
                         server = table->table[i];
-                        if(server)
+                        if (server)
                         {
                             ss_num--;
                         }
@@ -260,7 +355,7 @@ void *clientHandler(void *arg)
                                 if (!lastSlash)
                                 {
                                     send(client_socket, "Error: Invalid path format", strlen("Error: Invalid path format"), 0);
-                                    return;
+                                    return NULL;
                                 }
                                 *lastSlash = '\0';
                                 char *name = lastSlash + 1;
@@ -269,7 +364,7 @@ void *clientHandler(void *arg)
                                 if (!parentDir)
                                 {
                                     send(client_socket, "Error: Parent directory not found", strlen("Error: Parent directory not found"), 0);
-                                    return;
+                                    return NULL;
                                 }
                                 NodeType typ;
                                 if (strcmp(type, "DIR") == 0)
@@ -321,7 +416,7 @@ void *clientHandler(void *arg)
                     if (server->active)
                     {
                         char respond[100001];
-                        printf("server root %s\n",server->root->name);
+                        printf("server root %s\n", server->root->name);
                         send(server->socket, buffer, strlen(buffer), 0);
                         recv(server->socket, respond, sizeof(respond), 0);
                         printf("%s\n", respond);
@@ -342,15 +437,101 @@ void *clientHandler(void *arg)
             }
             else if (sscanf(buffer, "COPY %s %s", path, dest_path) == 2)
             {
-                // Handle COPY
-                // if (send_copy_request(storage_info, path, dest_path) == 0)
-                // {
-                //     send(client_socket, "COPY: Success\n", strlen("COPY: Success\n"), 0);
-                // }
-                // else
-                // {
-                //     send(client_socket, "COPY: Failed\n", strlen("COPY: Failed\n"), 0);
-                // }
+                StorageServer *source_server = findStorageServerByPath(table, path);
+                // printf("%s\n", source_server->root->name);
+                if (!source_server)
+                {
+                    const char *error = "Source path does not exist in any storage server";
+                    send(client_socket, error, strlen(error), 0);
+                    continue;
+                }
+                Node *source_node = findNode(source_server->root, path);
+                if (!source_node)
+                {
+                    const char *error = "Source path not found";
+                    send(client_socket, error, strlen(error), 0);
+                    continue;
+                }
+                // printf("bansal maa ka loda\n");
+                StorageServer *dest_server = findStorageServerByPath(table, dest_path);
+                if (!dest_server)
+                {
+                    // Destination server not found, check if parent directory exists
+                    char parent_path[MAX_PATH_LENGTH];
+                    getParentPath(dest_path, parent_path);
+
+                    dest_server = findStorageServerByPath(table, parent_path);
+                    if (!dest_server)
+                    {
+                        const char *error = "Destination path invalid";
+                        send(client_socket, error, strlen(error), 0);
+                        continue;
+                    }
+
+                    // Check if parent directory exists and is actually a directory
+                    Node *parent_node = findNode(dest_server->root, parent_path);
+                    if (!parent_node || parent_node->type != DIRECTORY_NODE)
+                    {
+                        const char *error = "Destination parent path is not a directory";
+                        send(client_socket, error, strlen(error), 0);
+                        continue;
+                    }
+                    else
+                    {
+                        char init_cmd[MAX_BUFFER_SIZE];
+                        snprintf(init_cmd, sizeof(init_cmd), "INIT_COPY %s %s", path, dest_path);
+                        send(source_server->socket, buffer, strlen(buffer), 0);
+                        send(dest_server->socket, buffer, strlen(buffer), 0);
+                        recv(source_server->socket, init_cmd, sizeof(init_cmd), 0);
+                        recv(dest_server->socket, init_cmd, sizeof(init_cmd), 0);
+                        // snprintf(init_cmd, sizeof(init_cmd), "INIT_COPY %s %s", path, dest_path);
+                        // send(source_server->socket, init_cmd, strlen(init_cmd), 0);
+                        // send(dest_server->socket, init_cmd, strlen(init_cmd), 0);
+                        char server_info[MAX_BUFFER_SIZE];
+                        snprintf(server_info, sizeof(server_info), "SOURCE SERVER_INFO %s %d", dest_server->ip, dest_server->client_port);
+                        send(source_server->socket, server_info, strlen(server_info), 0);
+
+                        snprintf(server_info, sizeof(server_info), "DEST SERVER_INFO %s %d",
+                                 source_server->ip, source_server->client_port);
+                        send(dest_server->socket, server_info, strlen(server_info), 0);
+                        char copy_cmd[MAX_BUFFER_SIZE];
+                        snprintf(copy_cmd, sizeof(copy_cmd), "START_COPY %s %s", path, dest_path);
+                        send(source_server->socket, copy_cmd, strlen(copy_cmd), 0);
+                        char response[100001];
+                        recv(source_server->socket, response, sizeof(response), 0);
+                        send(client_socket, response, strlen(response), 0);
+                    }
+                }
+                else
+                {
+                    // printf("heyyyy dear\n");
+                    Node *dest_node = findNode(dest_server->root, dest_path);
+                    if (dest_node->type == FILE_NODE)
+                    {
+                        const char *error = "Destination parent path is not a directory";
+                        send(client_socket, error, strlen(error), 0);
+                        continue;
+                    }
+                    else
+                    {
+                        printf("%s %s \n", source_server->root->name, dest_server->root->name);
+                        char init_cmd[MAX_BUFFER_SIZE];
+                        // snprintf(init_cmd, sizeof(init_cmd), "INIT_COPY %s %s", path, dest_path);
+                        send(source_server->socket, buffer, strlen(buffer), 0);
+                        // send(dest_server->socket, buffer, strlen(buffer), 0);
+                        recv(source_server->socket, init_cmd, sizeof(init_cmd), 0);
+                        // recv(dest_server->socket, init_cmd, sizeof(init_cmd), 0);
+                        // recv(source_server->socket, init_cmd, sizeof(init_cmd), 0);
+                        // recv(dest_server->socket, init_cmd, sizeof(init_cmd), 0);
+                        char server_info[MAX_BUFFER_SIZE];
+                        snprintf(server_info, sizeof(server_info), "SOURCE SERVER_INFO %s %d",
+                                 dest_server->ip, dest_server->client_port);
+                        send(source_server->socket, server_info, strlen(server_info), 0);
+                        char response[100001];
+                        recv(source_server->socket, response, sizeof(response), 0);
+                        send(client_socket, response, strlen(response), 0);
+                    }
+                }
             }
         }
         else if (strcmp(command, "EXIT") == 0)
@@ -363,118 +544,6 @@ void *clientHandler(void *arg)
                  strlen("Error: Unknown command\n"), 0);
         }
     }
-}
-
-Node *receiveNodeChain(int sock)
-{
-    Node *head = NULL;
-    Node *current = NULL;
-
-    while (1)
-    {
-        // Check for end of chain
-        int marker;
-        if (recv(sock, &marker, sizeof(int), 0) <= 0)
-            return NULL;
-        send(sock, "OK", 2, 0);
-        if (marker == -1)
-            break; // End of chain
-
-        // Receive node data
-        int name_len;
-        if (recv(sock, &name_len, sizeof(int), 0) <= 0)
-            return NULL;
-        send(sock, "OK", 2, 0);
-
-        char *name = malloc(name_len);
-        if (recv(sock, name, name_len, 0) <= 0)
-        {
-            free(name);
-            return NULL;
-        }
-        send(sock, "OK", 2, 0);
-
-        NodeType type;
-        Permissions permissions;
-        if (recv(sock, &type, sizeof(NodeType), 0) <= 0)
-        {
-            free(name);
-            return NULL;
-        }
-        send(sock, "OK", 2, 0);
-
-        if (recv(sock, &permissions, sizeof(Permissions), 0) <= 0)
-        {
-            free(name);
-            return NULL;
-        }
-        send(sock, "OK", 2, 0);
-
-        int loc_len;
-        if (recv(sock, &loc_len, sizeof(int), 0) <= 0)
-        {
-            free(name);
-            return NULL;
-        }
-        send(sock, "OK", 2, 0);
-
-        char *dataLocation = malloc(loc_len);
-        if (recv(sock, dataLocation, loc_len, 0) <= 0)
-        {
-            free(name);
-            free(dataLocation);
-            return NULL;
-        }
-        send(sock, "OK", 2, 0);
-
-        // Create new node
-        Node *newNode = createNode(name, type, permissions, dataLocation);
-        free(name);
-        free(dataLocation);
-
-        // Check if node has children
-        int has_children;
-        if (recv(sock, &has_children, sizeof(int), 0) <= 0)
-        {
-            freeNode(newNode);
-            return NULL;
-        }
-        send(sock, "OK", 2, 0);
-
-        if (has_children)
-        {
-            // Create hash table for children
-            newNode->children = createNodeTable();
-
-            // Receive all hash table entries
-            for (int i = 0; i < TABLE_SIZE; i++)
-            {
-                newNode->children->table[i] = receiveNodeChain(sock);
-
-                // Set parent pointers for the chain
-                Node *child = newNode->children->table[i];
-                while (child != NULL)
-                {
-                    child->parent = newNode;
-                    child = child->next;
-                }
-            }
-        }
-
-        // Add to chain
-        if (head == NULL)
-        {
-            head = newNode;
-            current = head;
-        }
-        else
-        {
-            current->next = newNode;
-            current = newNode;
-        }
-    }
-
-    return head;
 }
 
 // Function to receive all server information
@@ -614,35 +683,7 @@ int main()
     pthread_detach(storage_acceptor_thread);
 
     printf("Storage server acceptor started on port %d\n", STORAGE_PORT);
-    // printf("Waiting for storage server connection on port %d...\n", STORAGE_PORT);
 
-    // // Accept storage server connection
-    // int storage_sock;
-    // socklen_t storage_addrlen = sizeof(storage_addr);
-    // if ((storage_sock = accept(storage_server_fd, (struct sockaddr *)&storage_addr,
-    //                            &storage_addrlen)) < 0)
-    // {
-    //     perror("Storage accept failed");
-    //     exit(EXIT_FAILURE);
-    // }
-
-    // printf("Storage server connected.\n");
-
-    // // Receive storage server information
-    // if (receiveServerInfo(storage_sock, storage_info.ip, &storage_info.nm_port,
-    //                       &storage_info.client_port, &storage_info.root) != 0)
-    // {
-    //     printf("Failed to receive storage server information.\n");
-    //     exit(EXIT_FAILURE);
-    // }
-
-    // printf("Received storage server information:\n");
-    // printf("IP: %s\n", storage_info.ip);
-    // printf("Naming Port: %d\n", storage_info.nm_port);
-    // printf("Client Port: %d\n", storage_info.client_port);
-    // printf("client root %s\n", storage_info.root->name);
-
-    // Initialize naming server socket for client connections
     if ((naming_server_fd = socket(AF_INET, SOCK_STREAM, 0)) == 0)
     {
         perror("Naming socket creation failed");

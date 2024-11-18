@@ -35,6 +35,7 @@ Node *createNode(const char *name, NodeType type, Permissions perms, const char 
     return node;
 }
 
+
 // Insert a node into a directory's hash table
 void insertNode(NodeTable *table, Node *node)
 {
@@ -53,6 +54,20 @@ Node *searchNode(NodeTable *table, const char *name)
         current = current->next;
     }
     return current;
+}
+
+void getParentPath(const char *path, char *parent)
+{
+    strncpy(parent, path, MAX_PATH_LENGTH - 1);
+    char *last_slash = strrchr(parent, '/');
+    if (last_slash)
+    {
+        *last_slash = '\0';
+    }
+    else
+    {
+        parent[0] = '\0';
+    }
 }
 
 // Add a file under a directory with metadata
@@ -185,7 +200,7 @@ Node *searchPath(Node *root, const char *path)
         {
             // printf("Component not found: %s\n", pathComponents[i]);
             // // Print contents of current directory for debugging
-            // printf("Contents of directory %s:\n", current->name);
+            printf("Contents of directory %s:\n", current->name);
             for (int j = 0; j < TABLE_SIZE; j++)
             {
                 Node *child = current->children->table[j];

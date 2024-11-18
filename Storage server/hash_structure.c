@@ -186,15 +186,15 @@ Node *searchPath(Node *root, const char *path)
             // printf("Component not found: %s\n", pathComponents[i]);
             // // Print contents of current directory for debugging
             // printf("Contents of directory %s:\n", current->name);
-            for (int j = 0; j < TABLE_SIZE; j++)
-            {
-                Node *child = current->children->table[j];
-                while (child)
-                {
-                    printf("  - %s\n", child->name);
-                    child = child->next;
-                }
-            }
+            // for (int j = 0; j < TABLE_SIZE; j++)
+            // {
+            //     Node *child = current->children->table[j];
+            //     while (child)
+            //     {
+            //         printf("  - %s\n", child->name);
+            //         child = child->next;
+            //     }
+            // }
             current = NULL;
             break;
         }

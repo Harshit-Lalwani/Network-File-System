@@ -491,6 +491,33 @@ int main()
             recv(naming_sock, respond, sizeof(respond), 0);
             printf("%s\n", respond);
         }
+        else if (strncmp(command, "COPY ", 5) == 0)
+        {
+            char respond[100001];
+            send(naming_sock, command, strlen(command), 0);
+            recv(naming_sock, respond, sizeof(respond), 0);
+            printf("%s\n", respond);
+        }
+        else if (strncmp(command, "LIST", 4) == 0)
+        {
+            char response[100001] = {0}; // Buffer for response
+
+            // Send the LIST command to the naming server
+            send(naming_sock, command, strlen(command), 0);
+
+            // Receive the response from the server
+            int bytes_received = recv(naming_sock, response, sizeof(response) - 1, 0);
+
+            if (bytes_received > 0)
+            {
+                response[bytes_received] = '\0'; // Null-terminate the response
+                printf("List of files and directories:\n%s", response);
+            }
+            else
+            {
+                printf("Error: Unable to receive response from naming server.\n");
+            }
+        }
         else
         {
             printf("Invalid command. Type HELP for available commands.\n");
@@ -501,3 +528,4 @@ int main()
     printf("Connection closed.\n");
     return 0;
 }
+

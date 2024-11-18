@@ -1,5 +1,5 @@
 #include "header.h"
-#define PORT 8083
+#define PORT 8080
 
 int sendNodeChain(int sock, Node *node)
 {
@@ -141,6 +141,19 @@ void *handleClient(void *arg)
     pthread_exit(NULL);
 }
 
+// void *thread_process_command(void *arg)
+// {
+//     ThreadArgs *args = (ThreadArgs *)arg;
+
+//     // Process the command
+//     processCommand_namingServer(args->root, args->command, args->socket);
+
+//     // Free the thread arguments
+//     free(args);
+
+//     return NULL;
+// }
+
 void *namingServerHandler(void *arg)
 {
     struct ClientData *info = (struct ClientData *)arg;
@@ -151,7 +164,7 @@ void *namingServerHandler(void *arg)
     {
         // Receive command from naming server
         char command[100001];
-        ssize_t bytes_received = recv(naming_server_sock, command, sizeof(command) - 1, 0);
+        ssize_t bytes_received = recv(naming_server_sock, command, sizeof(command), 0);
 
         if (bytes_received <= 0)
         {
@@ -173,7 +186,7 @@ void *namingServerHandler(void *arg)
             }
 
             // Reregister with naming server
-            if (sendServerInfo(naming_server_sock, "127.0.0.1", PORT, PORT + 2, root) < 0)
+            if (sendServerInfo(naming_server_sock, "127.0.0.1", PORT, PORT+3, root) < 0)
             {
                 printf("Failed to re-register with naming server\n");
                 continue;
@@ -183,7 +196,8 @@ void *namingServerHandler(void *arg)
             continue;
         }
         command[bytes_received] = '\0';
-        processCommand_namingServer(root,command,naming_server_sock);
+        printf("naming aaya\n");
+        processCommand_namingServer(root, command, naming_server_sock);
     }
     return NULL;
 }
@@ -204,7 +218,7 @@ int main()
         exit(EXIT_FAILURE);
     }
     naming_serv_addr.sin_family = AF_INET;
-    naming_serv_addr.sin_port = htons(8080);
+    naming_serv_addr.sin_port = htons(PORT);
     if (inet_pton(AF_INET, "127.0.0.1", &naming_serv_addr.sin_addr) <= 0)
     {
         perror("Invalid address or address not supported");
@@ -223,7 +237,7 @@ int main()
             break;
         }
     }
-    if (sendServerInfo(naming_server_sock, "127.0.0.1", 8080, 8085, root) < 0)
+    if (sendServerInfo(naming_server_sock, "127.0.0.1", PORT, PORT+3, root) < 0)
     {
         printf("Failed to send server information\n");
     }
@@ -251,7 +265,7 @@ int main()
     }
     storage_serv_addr.sin_family = AF_INET;
     storage_serv_addr.sin_addr.s_addr = INADDR_ANY;
-    storage_serv_addr.sin_port = htons(8085);
+    storage_serv_addr.sin_port = htons(PORT+3);
     int opt = 1;
     if (setsockopt(storage_server_sock, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)) < 0)
     {
@@ -268,7 +282,7 @@ int main()
         perror("Listen failed");
         exit(EXIT_FAILURE);
     }
-    printf("Storage server is listening for client connections on port %d...\n", PORT + 2);
+    printf("Storage server is listening for client connections on port %d...\n", PORT+3);
     while (1)
     {
         struct sockaddr_in client_addr;

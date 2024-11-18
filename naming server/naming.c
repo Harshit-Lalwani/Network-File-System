@@ -479,6 +479,8 @@ void *clientHandler(void *arg)
                     else
                     {
                         char init_cmd[MAX_BUFFER_SIZE];
+                        memset(buffer,0,sizeof(buffer));
+                        snprintf(buffer,sizeof(buffer),"COPY %s %s",path,parent_path);
                         send(source_server->socket, buffer, strlen(buffer), 0);
                         recv(source_server->socket, init_cmd, sizeof(init_cmd), 0);
                         char server_info[MAX_BUFFER_SIZE];

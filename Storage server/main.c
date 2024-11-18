@@ -186,7 +186,7 @@ void *namingServerHandler(void *arg)
             }
 
             // Reregister with naming server
-            if (sendServerInfo(naming_server_sock, "127.0.0.1", PORT, PORT+2, root) < 0)
+            if (sendServerInfo(naming_server_sock, "127.0.0.1", PORT, PORT+3, root) < 0)
             {
                 printf("Failed to re-register with naming server\n");
                 continue;
@@ -205,8 +205,8 @@ void *namingServerHandler(void *arg)
 // Main function
 int main()
 {
-    Node *root = createNode("/home/mehulagarwal/Documents/sem1", DIRECTORY_NODE, READ | WRITE | EXECUTE, "/home/mehulagarwal/Documents/sem1");
-    traverseAndAdd(root, "/home/mehulagarwal/Documents/sem1");
+    Node *root = createNode("/home/mehulagarwal/Documents/sem2", DIRECTORY_NODE, READ | WRITE | EXECUTE, "/home/mehulagarwal/Documents/sem2");
+    traverseAndAdd(root, "/home/mehulagarwal/Documents/sem2");
     // printFileSystemTree(root,10);
     int naming_server_sock;
     struct sockaddr_in naming_naming_serv_addr;
@@ -237,7 +237,7 @@ int main()
             break;
         }
     }
-    if (sendServerInfo(naming_server_sock, "127.0.0.1", PORT, PORT+2, root) < 0)
+    if (sendServerInfo(naming_server_sock, "127.0.0.1", PORT, PORT+3, root) < 0)
     {
         printf("Failed to send server information\n");
     }
@@ -265,7 +265,7 @@ int main()
     }
     storage_serv_addr.sin_family = AF_INET;
     storage_serv_addr.sin_addr.s_addr = INADDR_ANY;
-    storage_serv_addr.sin_port = htons(PORT+2);
+    storage_serv_addr.sin_port = htons(PORT+3);
     int opt = 1;
     if (setsockopt(storage_server_sock, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)) < 0)
     {
@@ -282,7 +282,7 @@ int main()
         perror("Listen failed");
         exit(EXIT_FAILURE);
     }
-    printf("Storage server is listening for client connections on port %d...\n", PORT+2);
+    printf("Storage server is listening for client connections on port %d...\n", PORT+3);
     while (1)
     {
         struct sockaddr_in client_addr;

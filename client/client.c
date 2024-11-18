@@ -25,6 +25,8 @@ void displayHelp()
     printf("HELP - Display this help message\n\n");
 }
 
+//  WRITE DISPLAY EROR CODES ETC TOOO
+
 // Modify the structure to return both socket and port
 struct ServerInfo
 {
@@ -72,6 +74,7 @@ void handleRead(int sock, const char *command)
     send(sock, command, strlen(command), 0);
 
     // First receive file size
+    memset(buffer, 0, sizeof(buffer));
     bytes_received = recv(sock, buffer, sizeof(buffer), 0);
     buffer[bytes_received] = '\0';
     send(sock, command, strlen(command), 0);
@@ -220,12 +223,15 @@ void handleWrite(int sock, const char *command)
 
     // Send command to server
     send(sock, command, strlen(command), 0);
+    memset(buffer,0, sizeof(buffer));
     recv(sock, buffer, sizeof(buffer), 0);
     // Send content size
+    memset(buffer,0, sizeof(buffer));
     snprintf(buffer, sizeof(buffer), "FILE_SIZE:%ld", contentSize);
     send(sock, buffer, strlen(buffer), 0);
     // recv(sock, buffer, sizeof(buffer), 0);
 
+    memset(buffer,0, sizeof(buffer));
     // Wait for server acknowledgment
     ssize_t recv_size = recv(sock, buffer, sizeof(buffer), 0);
     if (recv_size <= 0)
@@ -259,6 +265,7 @@ void handleWrite(int sock, const char *command)
         remaining -= sent;
         offset += sent;
     }
+    memset(buffer,0, sizeof(buffer));
 
     // Receive confirmation
     recv_size = recv(sock, buffer, sizeof(buffer), 0);
@@ -268,6 +275,7 @@ void handleWrite(int sock, const char *command)
         return;
     }
     buffer[recv_size] = '\0';
+    memset(content, 0 , sizeof(content));
     printf("%s", buffer);
 }
 void handleMeta(int sock, const char *command)
@@ -275,6 +283,7 @@ void handleMeta(int sock, const char *command)
     char buffer[MAX_BUFFER_SIZE];
 
     send(sock, command, strlen(command), 0);
+    memset(buffer,0, sizeof(buffer));
     ssize_t bytes_received = recv(sock, buffer, sizeof(buffer), 0);
     buffer[bytes_received] = '\0';
     printf("%s", buffer);
@@ -317,6 +326,7 @@ void handleStream(int sock, const char *command)
 
     send(sock, command, strlen(command), 0);
 
+    memset(buffer,0, sizeof(buffer));
     bytes_received = recv(sock, buffer, sizeof(buffer), 0);
     buffer[bytes_received] = '\0';
 
@@ -364,6 +374,7 @@ struct ServerInfo connect_naming_server(int sock, char *command)
 
     send(sock, command, strlen(command), 0);
     char buffer[100001];
+    memset(buffer,0, sizeof(buffer));
     recv(sock, buffer, sizeof(buffer), 0);
 
     // Check if path not found
@@ -481,6 +492,7 @@ int main()
         {
             char respond[100001];
             send(naming_sock, command, strlen(command), 0);
+            memset(respond,0, sizeof(respond));
             recv(naming_sock, respond, sizeof(respond), 0);
             printf("%s\n", respond);
         }
@@ -488,6 +500,7 @@ int main()
         {
             char respond[100001];
             send(naming_sock, command, strlen(command), 0);
+            memset(respond,0, sizeof(respond));
             recv(naming_sock, respond, sizeof(respond), 0);
             printf("%s\n", respond);
         }
@@ -495,6 +508,7 @@ int main()
         {
             char respond[100001];
             send(naming_sock, command, strlen(command), 0);
+            memset(respond,0, sizeof(respond));
             recv(naming_sock, respond, sizeof(respond), 0);
             printf("%s\n", respond);
         }
@@ -505,6 +519,7 @@ int main()
             // Send the LIST command to the naming server
             send(naming_sock, command, strlen(command), 0);
 
+            memset(response,0, sizeof(response));
             // Receive the response from the server
             int bytes_received = recv(naming_sock, response, sizeof(response) - 1, 0);
 

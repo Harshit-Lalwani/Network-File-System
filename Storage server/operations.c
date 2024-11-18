@@ -457,9 +457,11 @@ int copy_single_file(int peer_socket, Node *source_node, const char *dest_path, 
 {
     // Send file metadata
     char metadata[MAX_BUFFER_SIZE];
+    memset(metadata, 0 , sizeof(metadata));
     snprintf(metadata, sizeof(metadata), "FILE_META %s %s %d", dest_path, source_node->name, source_node->permissions);
     send(peer_socket, metadata, strlen(metadata), 0);
     char respond[1024];
+    memset(respond, 0 , sizeof(respond));
     recv(peer_socket, respond, sizeof(respond), 0);
     // printf("%s\n", respond);
     if (strncmp(respond, "CREATE DONE", 11) == 0)
@@ -475,11 +477,13 @@ int copy_single_file(int peer_socket, Node *source_node, const char *dest_path, 
         {
             // printf("%s\n", buffer);
             send(peer_socket, buffer, bytes_read, 0);
+            memset(com, 0 , sizeof(com));
             recv(peer_socket, com, sizeof(com), 0);
             memset(buffer, 0, sizeof(buffer));
         }
         fclose(fp);
         send(peer_socket, "END_OF_FILE\n", strlen("END_OF_FILE\n"), 0);
+        memset(buffer, 0 , sizeof(buffer));
         recv(peer_socket, buffer, sizeof(buffer), 0);
         send(naming_socket, "COPY DONE", strlen("COPY DONE"), 0);
         return 1;
@@ -495,8 +499,10 @@ int copy_directory_recursive(int peer_socket, Node *dir_node, const char *dest_p
 {
     // Create directory on peer
     char dir_cmd[MAX_BUFFER_SIZE];
+    memset(dir_cmd, 0, sizeof(dir_cmd));
     snprintf(dir_cmd, sizeof(dir_cmd), "CREATE_DIR %s %s %d",dest_path, dir_node->name, dir_node->permissions);
     send(peer_socket, dir_cmd, strlen(dir_cmd), 0);
+    memset(dir_cmd, 0 , sizeof(dir_cmd));
     recv(peer_socket,dir_cmd,sizeof(dir_cmd),0);
     int flag=1;
     if (strncmp(dir_cmd, "CREATE DONE",11)==0)

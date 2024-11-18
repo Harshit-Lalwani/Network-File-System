@@ -138,6 +138,7 @@ void *storageServerHandler(void *arg)
     while (1)
     {
         char command[1024];
+        memset(command, 0,sizeof(command));
         ssize_t bytes_received = recv(server->socket, command, sizeof(command) - 1, 0);
 
         if (bytes_received <= 0)
@@ -185,6 +186,7 @@ void *clientHandler(void *arg)
     ssize_t bytes_received;
     while (1)
     {
+        memset(buffer, 0 , sizeof(buffer));
         bytes_received = recv(client_socket, buffer, sizeof(buffer), 0);
         buffer[bytes_received] = '\0';
         if (sscanf(buffer, "%s %s", command, path) < 1)
@@ -213,6 +215,7 @@ void *clientHandler(void *arg)
             if (server->active)
             {
                 printf("storage details %s %d\n", server->ip, server->client_port);
+                memset(response, 0 , sizeof(response));
                 snprintf(response, sizeof(response), "StorageServer: %s : %d", server->ip, server->client_port);
                 send(client_socket, response, strlen(response), 0);
             }
@@ -346,6 +349,7 @@ void *clientHandler(void *arg)
                         {
                             char respond[100001];
                             send(server->socket, buffer, strlen(buffer), 0);
+                            memset(respond, 0 , sizeof(respond));
                             recv(server->socket, respond, sizeof(respond), 0);
                             printf("%s\n", respond);
                             if (strncmp(respond, "CREATE DONE", 11) == 0)
@@ -418,6 +422,7 @@ void *clientHandler(void *arg)
                         char respond[100001];
                         printf("server root %s\n", server->root->name);
                         send(server->socket, buffer, strlen(buffer), 0);
+                        memset(respond, 0, sizeof(respond));
                         recv(server->socket, respond, sizeof(respond), 0);
                         printf("%s\n", respond);
                         if (strcmp(respond, "DELETE DONE") == 0)
@@ -482,12 +487,15 @@ void *clientHandler(void *arg)
                         memset(buffer,0,sizeof(buffer));
                         snprintf(buffer,sizeof(buffer),"COPY %s %s",path,parent_path);
                         send(source_server->socket, buffer, strlen(buffer), 0);
+                        memset(init_cmd, 0 , sizeof(init_cmd));
                         recv(source_server->socket, init_cmd, sizeof(init_cmd), 0);
                         char server_info[MAX_BUFFER_SIZE];
+                        memset(server_info, 0 , sizeof(server_info));
                         snprintf(server_info, sizeof(server_info), "SOURCE SERVER_INFO %s %d",
                                  dest_server->ip, dest_server->client_port);
                         send(source_server->socket, server_info, strlen(server_info), 0);
                         char response[100001];
+                        memset(response, 0 , sizeof(response));
                         recv(source_server->socket, response, sizeof(response), 0);
                         if (strncmp(response, "COPY DONE",9)==0)
                         {
@@ -539,12 +547,15 @@ void *clientHandler(void *arg)
                         printf("hello\n");
                         char init_cmd[MAX_BUFFER_SIZE];
                         send(source_server->socket, buffer, strlen(buffer), 0);
+                        memset(init_cmd, 0, sizeof(init_cmd));
                         recv(source_server->socket, init_cmd, sizeof(init_cmd), 0);
                         char server_info[MAX_BUFFER_SIZE];
+                        memset(server_info , 0  , sizeof(server_info));
                         snprintf(server_info, sizeof(server_info), "SOURCE SERVER_INFO %s %d",
                                  dest_server->ip, dest_server->client_port);
                         send(source_server->socket, server_info, strlen(server_info), 0);
                         char response[100001];
+                        memset(response, 0 , sizeof(response));
                         recv(source_server->socket, response, sizeof(response), 0);
                         if (strncmp(response, "COPY DONE", 9) == 0)
                         {
@@ -602,12 +613,14 @@ int receiveServerInfo(int sock, char *ip_out, int *nm_port_out, int *client_port
 {
     char buffer[1024];
     int bytes_received;
+    memset(buffer, 0 , sizeof(buffer));
     bytes_received = recv(sock, buffer, sizeof(buffer), 0);
     if (bytes_received <= 0)
     {
         perror("Failed to receive data");
         return -1;
     }
+    // memset(buffer, 0 , sizeof(buffer));
     memcpy(ip_out, buffer, 16);
     memcpy(nm_port_out, buffer + 16, sizeof(int));
     memcpy(client_port_out, buffer + 16 + sizeof(int), sizeof(int));

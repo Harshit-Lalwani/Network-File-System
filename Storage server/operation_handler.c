@@ -98,7 +98,7 @@ int min(int a, int b)
     return b;
 }
 
-void sendAckToNamingServer(const char *message, int clientId, const char *fileName, const char *clientIP, int clientPort)
+void sendAckToNamingServer(const char *status, const char *message, int clientId, const char *fileName, const char *clientIP, int clientPort,char *ip)
 {
     int ack_socket;
     struct sockaddr_in naming_server_addr;
@@ -118,7 +118,7 @@ void sendAckToNamingServer(const char *message, int clientId, const char *fileNa
     naming_server_addr.sin_port = htons(naming_server_port);
 
     // Convert IP address to binary form
-    if (inet_pton(AF_INET, "127.0.0.1", &naming_server_addr.sin_addr) <= 0)
+    if (inet_pton(AF_INET,ip, &naming_server_addr.sin_addr) <= 0)
     {
         perror("Invalid address or address not supported");
         close(ack_socket);
@@ -136,11 +136,10 @@ void sendAckToNamingServer(const char *message, int clientId, const char *fileNa
     // Prepare the acknowledgment message
     char ack_message[512];
     snprintf(ack_message, sizeof(ack_message),
-             "Acknowledgment from Storage Server:\n"
+             "%s Message from Storage Server:\n"
              "Client ID: %d\nClient IP: %s\nClient Port: %d\n"
              "File: %s\nMessage: %s\n",
-             clientId, clientIP, clientPort, fileName, message);
-
+             status, clientId, clientIP, clientPort, fileName, message);
     // Send the acknowledgment message
     if (send(ack_socket, ack_message, strlen(ack_message), 0) < 0)
     {
@@ -155,8 +154,9 @@ void sendAckToNamingServer(const char *message, int clientId, const char *fileNa
     close(ack_socket);
 }
 
-void *flushAsyncWrites()
+void *flushAsyncWrites(char *ip)
 {
+
     printf("is the function even called\n");
     while (1)
     {
@@ -175,6 +175,7 @@ void *flushAsyncWrites()
             asyncWriteQueue = asyncWriteQueue->next;
 
             pthread_mutex_unlock(&queueMutex);
+            sendAckToNamingServer("Start", "Write operation started for file", task->clientId, task->targetNode->name, task->clientIP, task->clientPort,ip);
 
             // Simulate writing to persistent storage
             FILE *file = fopen(task->targetNode->dataLocation, "a");
@@ -183,7 +184,7 @@ void *flushAsyncWrites()
                 fwrite(task->data, 1, task->size, file);
                 fclose(file);
                 printf("Async write completed for file: %s\n", task->targetNode->name);
-                sendAckToNamingServer("Write operation completed successfully for file", task->clientId, task->targetNode->name, task->clientIP, task->clientPort);
+                sendAckToNamingServer("End", "Write operation completed successfully for file", task->clientId, task->targetNode->name, task->clientIP, task->clientPort,ip);
             }
             else
             {
@@ -278,12 +279,12 @@ void processCommand_user(Node *root, char *input, int client_socket)
         cmd_start++;
     if (strlen(cmd_start) == 0)
     {
-        send(client_socket, "Error: Empty command\n", strlen("Error: Empty command\n"), 0);
+        send(client_socket, " \033[1;31mERROR 101:\033[0m \033[38;5;214mInvalid Command: Empty Command!\033[0m\n\0", strlen(" \033[1;31mERROR 101:\033[0m \033[38;5;214mInvalid Command: Empty Command!\033[0m\n\0"), 0);
         return;
     }
     if (sscanf(cmd_start, "%s", command) != 1)
     {
-        send(client_socket, "Error reading command\n", strlen("Error reading command\n"), 0);
+        send(client_socket, " \033[1;31mERROR 101:\033[0m \033[38;5;214mInvalid Command!\033[0m\n\0", strlen(" \033[1;31mERROR 101:\033[0m \033[38;5;214mInvalid Command!\033[0m\n\0"), 0);
         return;
     }
     cmd_start += strlen(command);
@@ -305,7 +306,7 @@ void processCommand_user(Node *root, char *input, int client_socket)
     case CMD_STREAM:
         if (sscanf(cmd_start, "%s", path) != 1)
         {
-            send(client_socket, "Error: Path required\n", strlen("Error: Path required\n"), 0);
+            send(client_socket, " \033[1;31mERROR 404:\033[0m \033[38;5;214mPath not found!\033[0m\n\0", strlen(" \033[1;31mERROR 404:\033[0m \033[38;5;214mPath not found!\033[0m\n\0"), 0);
             return;
         }
 
@@ -313,7 +314,7 @@ void processCommand_user(Node *root, char *input, int client_socket)
         if (!targetNode)
         {
             memset(response, 0, sizeof(response));
-            snprintf(response, sizeof(response), "Path not found\n");
+            snprintf(response, sizeof(response), " \033[1;31mERROR 404:\033[0m \033[38;5;214mPath not found!\033[0m\n\0");
             send(client_socket, response, strlen(response), 0);
             return;
         }
@@ -324,13 +325,25 @@ void processCommand_user(Node *root, char *input, int client_socket)
             // Check if the lock is open
             if (targetNode->lock_type == 2)
             {
-                snprintf(response, sizeof(response), "Error: File is being written to\n");
+                snprintf(response, sizeof(response), " \033[1;31mERROR 52:\033[0m \033[38;5;214mFile is being written to\n\0\033[0m");                              
                 send(client_socket, response, strlen(response), 0);
                 return;
             }
             ssize_t bytes;
             off_t offset = 0;
             struct stat st;
+            if ((targetNode->permissions & READ) == 0)
+            {
+                const char *error = " \033[1;31mERROR 50:\033[0m \033[38;5;214mPermission Denied!\033[0m\n\0";
+                send(client_socket, error, strlen(error), 0);
+                return;
+            }
+            if (targetNode->type != FILE_NODE)
+            {
+                const char *error = " \033[1;31mERROR 51:\033[0m \033[38;5;214mNot a File!\033[0m\n\0";
+                send(client_socket, error, strlen(error), 0);
+                return;
+            }
             if (getFileMetadata(targetNode, &st) == 0)
             {
                 memset(response, 0, sizeof(response));
@@ -362,14 +375,18 @@ void processCommand_user(Node *root, char *input, int client_socket)
             // Check if the lock is open
             if (targetNode->lock_type == 2)
             {
-                snprintf(response, sizeof(response), "Error: File is being written to\n");
+                printf(" \033[1;31mERROR 52:\033[0m \033[38;5;214mFile is being written to\n\0\033[0m");
+                printf(" ");
+                snprintf(response, sizeof(response), " \033[1;31mERROR 52:\033[0m \033[38;5;214mFile is being written to\n\0\033[0m");
                 send(client_socket, response, strlen(response), 0);
                 return;
             }
             // Check if the lock is open
             if (targetNode->lock_type == 1)
             {
-                snprintf(response, sizeof(response), "Error: File is being read.\n");
+                printf(" \033[1;31mERROR 52:\033[0m \033[38;5;214mFile is being read\n\0\033[0m");
+                PRINTF(" ");
+                snprintf(response, sizeof(response), "\033[1;31mERROR: 52\033[0m \033[38;5;214mFile is being read\033[0m\n\0");
                 send(client_socket, response, strlen(response), 0);
                 return;
             }
@@ -378,15 +395,27 @@ void processCommand_user(Node *root, char *input, int client_socket)
             // First receive file size from client
             memset(buffer, 0, sizeof(buffer));
             recv(client_socket, buffer, sizeof(buffer), 0);
-
-            long fileSize;
-            if (sscanf(buffer, "FILE_SIZE:%ld", &fileSize) != 1)
+            if ((targetNode->permissions & WRITE) == 0)
             {
-                send(client_socket, "Error: Invalid file size format\n",
-                     strlen("Error: Invalid file size format\n"), 0);
+                const char *error = " \033[1;31mERROR 50:\033[0m \033[38;5;214mPermission Denied!\033[0m\n\0";
+                send(client_socket, error, strlen(error), 0);
                 return;
             }
-            if (fileSize >= 1000) // condition that will check whether asynchornous write should happen or not
+            if (targetNode->type != FILE_NODE)
+            {
+                const char *error = " \033[1;31mERROR 51:\033[0m \033[38;5;214mNot a File!\033[0m\n\0";
+                send(client_socket, error, strlen(error), 0);
+                return;
+            }
+            long fileSize;
+            int ack_port;
+            if (sscanf(buffer, "FILE_SIZE:%ld|ACK_PORT:%d", &fileSize, &ack_port) != 2)
+            {
+                send(client_socket, " \033[1;31mERROR 46:\033[0m \033[38;5;214mInvalid file size format!\033[0m\n\0",
+                     strlen(" \033[1;31mERROR 46:\033[0m \033[38;5;214mInvalid file size format!\033[0m\n\0"), 0);
+                return;
+            }
+            if (fileSize >= 10) // condition that will check whether asynchornous write should happen or not
             {
                 is_sync = 0;
             }
@@ -411,22 +440,23 @@ void processCommand_user(Node *root, char *input, int client_socket)
 
                     if (bytesReceived <= 0)
                     {
-                        send(client_socket, "Error receiving file data\n",
-                             strlen("Error receiving file data\n"), 0);
+                        send(client_socket, " \033[1;31mERROR 56:\033[0m \033[38;5;214mUnable to receive file data!\033[0m\n\0",
+                             strlen(" \033[1;31mERROR 56:\033[0m \033[38;5;214mUnable to receive file data!\033[0m\n\0"), 0);
                         return;
                     }
 
                     if (writeFileChunk(targetNode, buffer, bytesReceived, totalReceived) != bytesReceived)
                     {
-                        send(client_socket, "Error writing to file\n",
-                             strlen("Error writing to file\n"), 0);
+                        send(client_socket, " \033[1;31mERROR 57:\033[0m \033[38;5;214mUnable to Write to the file!\033[0m\n\0",
+                             strlen(" \033[1;31mERROR 57:\033[0m \033[38;5;214mUnable to Write to the file!\033[0m\n\0"), 0);
                         return;
                     }
                     send(client_socket, "ok\0", 3, 0);
                     totalReceived += bytesReceived;
                 }
-                recv(client_socket,buffer, sizeof(buffer),0);
-                memset(response, 0 , sizeof(response));
+                memset(buffer, 0, sizeof(buffer));
+                recv(client_socket, buffer, sizeof(buffer), 0);
+                memset(response, 0, sizeof(response));
                 snprintf(response, sizeof(response), "Successfully wrote %ld bytes\n", totalReceived);
                 send(client_socket, response, strlen(response), 0);
             }
@@ -442,13 +472,13 @@ void processCommand_user(Node *root, char *input, int client_socket)
                 }
                 char client_ip[INET_ADDRSTRLEN];
                 inet_ntop(AF_INET, &client_addr.sin_addr, client_ip, INET_ADDRSTRLEN);
-                int client_port = ntohs(client_addr.sin_port);
+                int client_port = ack_port;
                 char *asyncDataBuffer = malloc(fileSize);
 
                 if (!asyncDataBuffer)
                 {
-                    send(client_socket, "Error: Memory allocation failed\n",
-                         strlen("Error: Memory allocation failed\n"), 0);
+                    send(client_socket, " \033[1;31mERROR 58:\033[0m \033[38;5;214mMemory allocation failed!\033[0m\n\0",
+                         strlen(" \033[1;31mERROR 58:\033[0m \033[38;5;214mMemory allocation failed!\033[0m\n\0"), 0);
                     return;
                 }
 
@@ -462,8 +492,8 @@ void processCommand_user(Node *root, char *input, int client_socket)
                     if (bytesReceived <= 0)
                     {
                         free(asyncDataBuffer);
-                        send(client_socket, "Error receiving file data\n",
-                             strlen("Error receiving file data\n"), 0);
+                        send(client_socket, " \033[1;31mERROR 56:\033[0m \033[38;5;214mUnable to receive file data.\033[0m\n\0",
+                             strlen(" \033[1;31mERROR 56:\033[0m \033[38;5;214mUnable to receive file data.\033[0m\n\0"), 0);
                         return;
                     }
                     send(client_socket, "ok\0", 3, 0);
@@ -472,7 +502,8 @@ void processCommand_user(Node *root, char *input, int client_socket)
                     memcpy(asyncDataBuffer + totalReceived, buffer, bytesReceived);
                     totalReceived += bytesReceived;
                 }
-                recv(client_socket,buffer, sizeof(buffer),0);
+                memset(buffer, 0, sizeof(buffer));
+                recv(client_socket, buffer, sizeof(buffer), 0);
 
                 send(client_socket, "ACK: WRITE REQUEST ACCEPTED\n", strlen("ACK: WRITE REQUEST ACCEPTED\n"), 0);
 
@@ -480,7 +511,7 @@ void processCommand_user(Node *root, char *input, int client_socket)
                 if (queueAsyncWrite(targetNode, asyncDataBuffer, fileSize, client_socket, client_ip, client_port) != 0)
                 {
                     free(asyncDataBuffer);
-                    send(client_socket, "Error: Failed to queue async write\n", strlen("Error: Failed to queue async write\n"), 0);
+                    send(client_socket, " \033[1;31mERROR 90:\033[0m \033[38;5;214mFailed to queue asynchronous write!\033[0m\n\0", strlen(" \033[1;31mERROR 90:\033[0m \033[38;5;214mFailed to queue asynchronous write!\033[0m\n\0"), 0);
                     return;
                 }
 
@@ -495,7 +526,7 @@ void processCommand_user(Node *root, char *input, int client_socket)
             {
                 char permissions[64];
                 getPermissionsString(metadata.st_mode & 0777, permissions, sizeof(permissions));
-                memset(response, 0 , sizeof(response));
+                memset(response, 0, sizeof(response));
                 snprintf(response, sizeof(response),
                          "File Metadata:\nName: %s\nType: %s\nSize: %ld bytes\n"
                          "Permissions: %s\nLast access: %sLast modification: %s\n",
@@ -509,8 +540,8 @@ void processCommand_user(Node *root, char *input, int client_socket)
             }
             else
             {
-                send(client_socket, "Error getting metadata\n",
-                     strlen("Error getting metadata\n"), 0);
+                send(client_socket, " \033[1;31mERROR 30:\033[0m \033[38;5;214mUnable to get MetaData.\033[0m\n\0",
+                     strlen(" \033[1;31mERROR 30:\033[0m \033[38;5;214mUnable to get MetaData.\033[0m\n\0"), 0);
             }
         }
         else if (cmd == CMD_STREAM)
@@ -518,15 +549,26 @@ void processCommand_user(Node *root, char *input, int client_socket)
             off_t offset = 0;
             int chunks = 0;
             ssize_t bytes;
-
+            if ((targetNode->permissions & READ) == 0)
+            {
+                const char *error = " \033[1;31mERROR 50:\033[0m \033[38;5;214mPermission Denied!\033[0m\n\0";
+                send(client_socket, error, strlen(error), 0);
+                return;
+            }
+            if (targetNode->type != FILE_NODE)
+            {
+                const char *error = " \033[1;31mERROR 51:\033[0m \033[38;5;214mNot a File!\033[0m\n\0";
+                send(client_socket, error, strlen(error), 0);
+                return;
+            }
             send(client_socket, "START_STREAM\n", strlen("START_STREAM\n"), 0);
 
             while ((bytes = streamAudioFile(targetNode, buffer, CHUNK_SIZE, offset)) > 0)
             {
                 if (send(client_socket, buffer, bytes, 0) != bytes)
                 {
-                    send(client_socket, "Error streaming data\n",
-                         strlen("Error streaming data\n"), 0);
+                    send(client_socket, " \033[1;31mERROR 31:\033[0m \033[38;5;214mUnable to Stream Data!\033[0m\n\0",
+                         strlen(" \033[1;31mERROR 31:\033[0m \033[38;5;214mUnable to Stream Data!\033[0m\n\0"), 0);
                     break;
                 }
                 memset(buffer, 0, sizeof(buffer));
@@ -546,14 +588,14 @@ void processCommand_user(Node *root, char *input, int client_socket)
         int permissions;
         if (sscanf(cmd_start, "%s %s %d", path, name, &permissions) != 3)
         {
-            send(client_socket, "Error: Path required\n", strlen("Error: Path required\n"), 0);
+            send(client_socket, " \033[1;31mERROR 404:\033[0m \033[38;5;214mPath is needed!\033[0m\n\0", strlen(" \033[1;31mERROR 404:\033[0m \033[38;5;214mPath is needed!\033[0m\n\0"), 0);
             return;
         }
         Node *parentDir = findNode(root, path);
         if (!parentDir)
         {
-            memset(response, 0 , sizeof(response));
-            snprintf(response, sizeof(response), "Error: Parent directory not found");
+            memset(response, 0, sizeof(response));
+            snprintf(response, sizeof(response), " \033[1;31mERROR 100:\033[0m \033[38;5;214mParent Directory Missing!\033[0m\n\0");
             send(client_socket, response, strlen(response), 0);
             memset(response, 0, sizeof(response));
             return;
@@ -562,7 +604,7 @@ void processCommand_user(Node *root, char *input, int client_socket)
         NodeType type = FILE_NODE;
         if (createEmptyNode(parentDir, name, type))
         {
-            memset(response, 0 , sizeof(response));
+            memset(response, 0, sizeof(response));
             snprintf(response, sizeof(response), "CREATE DONE");
             send(client_socket, response, strlen(response), 0);
             memset(response, 0, sizeof(response));
@@ -589,8 +631,8 @@ void processCommand_user(Node *root, char *input, int client_socket)
         }
         else
         {
-            memset(response, 0 , sizeof(response));
-            snprintf(response, sizeof(response), "Error creating node");
+            memset(response, 0, sizeof(response));
+            snprintf(response, sizeof(response), " \033[1;31mERROR 32:\033[0m \033[38;5;214mUnable to create node!\033[0m\n\0");
             send(client_socket, response, strlen(response), 0);
             memset(response, 0, sizeof(response));
             return;
@@ -601,14 +643,14 @@ void processCommand_user(Node *root, char *input, int client_socket)
         int permissions2;
         if (sscanf(cmd_start, "%s %s %d", path, name2, &permissions2) != 3)
         {
-            send(client_socket, "Error: Path required\n", strlen("Error: Path required\n"), 0);
+            send(client_socket, " \033[1;31mERROR 404:\033[0m \033[38;5;214mPath is needed!\033[0m\n\0", strlen(" \033[1;31mERROR 404:\033[0m \033[38;5;214mPath is needed!\033[0m\n\0"), 0);
             return;
         }
         parentDir = findNode(root, path);
         if (!parentDir)
         {
-            memset(response, 0 , sizeof(response));
-            snprintf(response, sizeof(response), "Error: Parent directory not found");
+            memset(response, 0, sizeof(response));
+            snprintf(response, sizeof(response), " \033[1;31mERROR 100:\033[0m \033[38;5;214mParent Disrectory Missing!\033[0m\n\0");
             send(client_socket, response, strlen(response), 0);
             memset(response, 0, sizeof(response));
             return;
@@ -617,7 +659,8 @@ void processCommand_user(Node *root, char *input, int client_socket)
         type = DIRECTORY_NODE;
         if (createEmptyNode(parentDir, name2, type))
         {
-            memset(response, 0 , sizeof(response));
+            memset(response, 0, sizeof(response));
+
             snprintf(response, sizeof(response), "CREATE DONE");
             send(client_socket, response, strlen(response), 0);
             memset(response, 0, sizeof(response));
@@ -625,8 +668,8 @@ void processCommand_user(Node *root, char *input, int client_socket)
         }
         else
         {
-            memset(response, 0 , sizeof(response));
-            snprintf(response, sizeof(response), "CREATE FAILED");
+            memset(response, 0, sizeof(response));
+            snprintf(response, sizeof(response), " \033[1;31mERROR 44:\033[0m \033[38;5;214mFailed to Create!\033[0m\n\0");
             send(client_socket, response, strlen(response), 0);
             memset(response, 0, sizeof(response));
             return;
@@ -634,7 +677,7 @@ void processCommand_user(Node *root, char *input, int client_socket)
         break;
 
     case CMD_UNKNOWN:
-        send(client_socket, "Unknown command: %s\nUsage: READ|WRITE|META|STREAM <args>\n", strlen("Unknown command: %s\nUsage: READ|WRITE|META|STREAM <args>\n"), 0);
+        send(client_socket, " \033[1;31mERROR 101:\033[0m \033[38;5;214mUnknown command: %s\nUsage: READ|WRITE|META|STREAM <args>\n\033[0m\n\0", strlen(" \033[1;31mERROR 101:\033[0m \033[38;5;214mUnknown command: %s\nUsage: READ|WRITE|META|STREAM <args>\n\033[0m\n\0"), 0);
         break;
     }
 }
@@ -655,12 +698,12 @@ void processCommand_namingServer(Node *root, char *input, int client_socket)
     if (strlen(cmd_start) == 0)
     {
         printf("hey\n");
-        send(client_socket, "Error: Empty command\n", strlen("Error: Empty command\n"), 0);
+        send(client_socket, " \033[1;31mERROR 101:\033[0m \033[38;5;214mInvalid Command: It is empty!\033[0m\n\0", strlen(" \033[1;31mERROR 101:\033[0m \033[38;5;214mInvalid Command: It is empty!\033[0m\n\0"), 0);
         return;
     }
     if (sscanf(cmd_start, "%s", command) != 1)
     {
-        send(client_socket, "Error reading command\n", strlen("Error reading command\n"), 0);
+        send(client_socket, " \033[1;31mERROR 101:\033[0m \033[38;5;214mInvalid Command Format!\033[0m\n\0", strlen(" \033[1;31mERROR 101:\033[0m \033[38;5;214mInvalid Command Format!\033[0m\n\0"), 0);
         return;
     }
     cmd_start += strlen(command);
@@ -679,10 +722,13 @@ void processCommand_namingServer(Node *root, char *input, int client_socket)
     switch (cmd)
     {
     case CMD_CREATE:
+        // char ack[100001];
+        // send(client_socket, "lala lala\n", strlen("lala lala\n"), 0);
+        // recv(client_socket,ack,sizeof(ack),0);
         if (sscanf(cmd_start, "%s %d %s", typeStr, &temp, path) != 3)
         {
-            memset(response, 0 , sizeof(response));
-            snprintf(response, sizeof(response), "Error: Type and path required");
+            memset(response, 0, sizeof(response));
+            snprintf(response, sizeof(response), " \033[1;31mERROR 101:\033[0m \033[38;5;214mInvalid Command: Type and path are required!\033[0m\n\0");
             send(client_socket, response, strlen(response), 0);
             memset(response, 0, sizeof(response));
             return;
@@ -690,8 +736,8 @@ void processCommand_namingServer(Node *root, char *input, int client_socket)
         char *lastSlash = strrchr(path, '/');
         if (!lastSlash)
         {
-            memset(response, 0 , sizeof(response));
-            snprintf(response, sizeof(response), "Error: Invalid path format");
+            memset(response, 0, sizeof(response));
+            snprintf(response, sizeof(response), " \033[1;31mERROR 404:\033[0m \033[38;5;214mInvalid Path Format!\033[0m\n\0");
             send(client_socket, response, strlen(response), 0);
             memset(response, 0, sizeof(response));
             return;
@@ -703,8 +749,8 @@ void processCommand_namingServer(Node *root, char *input, int client_socket)
 
         if (!parentDir)
         {
-            memset(response, 0 , sizeof(response));
-            snprintf(response, sizeof(response), "Error: Parent directory not found");
+            memset(response, 0, sizeof(response));
+            snprintf(response, sizeof(response), " \033[1;31mERROR 100:\033[0m \033[38;5;214mParent Directory Missing!\033[0m\n\0");
             send(client_socket, response, strlen(response), 0);
             memset(response, 0, sizeof(response));
             return;
@@ -713,16 +759,23 @@ void processCommand_namingServer(Node *root, char *input, int client_socket)
         NodeType type = (strcasecmp(typeStr, "DIR") == 0) ? DIRECTORY_NODE : FILE_NODE;
         if (createEmptyNode(parentDir, name, type))
         {
-            memset(response, 0 , sizeof(response));
+            memset(response, 0, sizeof(response));
+            printf("hillo\n");
+            fflush(stdout);
             snprintf(response, sizeof(response), "CREATE DONE");
-            send(client_socket, response, strlen(response), 0);
+            if (send(client_socket, response, strlen(response), 0) < 0)
+            {
+                perror("hajnckm");
+            }
+            printf("sent\n");
+            fflush(stdout);
             memset(response, 0, sizeof(response));
             return;
         }
         else
         {
-            memset(response, 0 , sizeof(response));
-            snprintf(response, sizeof(response), "Error creating node");
+            memset(response, 0, sizeof(response));
+            snprintf(response, sizeof(response), " \033[1;31mERROR 32:\033[0m \033[38;5;214mUnable to create node!\033[0m\n\0");
             send(client_socket, response, strlen(response), 0);
             memset(response, 0, sizeof(response));
         }
@@ -730,7 +783,7 @@ void processCommand_namingServer(Node *root, char *input, int client_socket)
 
     case CMD_COPY:
         sscanf(cmd_start, "%s %s", path, secondPath);
-        memset(buffer, 0 , sizeof(buffer));
+        memset(buffer, 0, sizeof(buffer));
         snprintf(buffer, sizeof(buffer), "ACknowledgement");
         ssize_t bytes_sent = send(client_socket, buffer, strlen(buffer), 0);
         printf("Bytes sent: %zd\n", bytes_sent);
@@ -744,7 +797,7 @@ void processCommand_namingServer(Node *root, char *input, int client_socket)
         }
         printf("sent %s\n", buffer);
         fflush(stdout);
-        memset(buffer, 0 , sizeof(buffer));
+        memset(buffer, 0, sizeof(buffer));
         ssize_t bytes_received = recv(client_socket, buffer, sizeof(buffer) - 1, 0);
         if (bytes_received <= 0)
             break;
@@ -764,8 +817,8 @@ void processCommand_namingServer(Node *root, char *input, int client_socket)
     case CMD_DELETE:
         if (sscanf(cmd_start, "%s", path) != 1)
         {
-            memset(response, 0 , sizeof(response));
-            snprintf(response, sizeof(response), "Error: Path required");
+            memset(response, 0, sizeof(response));
+            snprintf(response, sizeof(response), " \033[1;31mERROR 404:\033[0m \033[38;5;214mMissing Path argument!\033[0m\n\0");
             send(client_socket, response, strlen(response), 0);
             memset(response, 0, sizeof(response));
             return;
@@ -773,31 +826,31 @@ void processCommand_namingServer(Node *root, char *input, int client_socket)
         Node *nodeToDelete = searchPath(root, path);
         if (!nodeToDelete)
         {
-            memset(response, 0 , sizeof(response));
-            snprintf(response, sizeof(response), "Error: Path not found");
+            memset(response, 0, sizeof(response));
+            snprintf(response, sizeof(response), " \033[1;31mERROR 404:\033[0m \033[38;5;214mPath not found!\033[0m\n\0");
             send(client_socket, response, strlen(response), 0);
             memset(response, 0, sizeof(response));
             return;
         }
         if (deleteNode(nodeToDelete) == 0)
         {
-            memset(response, 0 , sizeof(response));
+            memset(response, 0, sizeof(response));
             snprintf(response, sizeof(response), "DELETE DONE");
             send(client_socket, response, strlen(response), 0);
             memset(response, 0, sizeof(response));
         }
         else
         {
-            memset(response, 0 , sizeof(response));
-            snprintf(response, sizeof(response), "Error deleting node");
+            memset(response, 0, sizeof(response));
+            snprintf(response, sizeof(response), " \033[1;31mERROR 33:\033[0m \033[38;5;214mUnable to delete node!\033[0m\n\0");
             send(client_socket, response, strlen(response), 0);
             memset(response, 0, sizeof(response));
         }
         break;
 
     case CMD_UNKNOWN:
-        memset(response, 0 , sizeof(response));
-        snprintf(response, sizeof(response), "Unknown command: %s\nUsage:CREATE|COPY|DELETE <args>", command);
+        memset(response, 0, sizeof(response));
+        snprintf(response, sizeof(response), " \033[1;31mERROR 101:\033[0m \033[38;5;214mUnknown command: %s\nUsage: READ|WRITE|META|STREAM <args>\n\033[0m\n\0", command);
         send(client_socket, response, strlen(response), 0);
         memset(response, 0, sizeof(response));
         break;

@@ -1,6 +1,5 @@
 #include "header.h"
 
-
 int getFileMetadata(Node *fileNode, struct stat *metadata)
 {
     if (!fileNode || !fileNode->dataLocation)
@@ -371,7 +370,17 @@ void copy_files_to_peer(const char *source_path, const char *dest_path, const ch
 
     if (source_node->type == FILE_NODE)
     {
-        copy_single_file(peer_socket, source_node, dest_path, naming_socket);
+
+        if (copy_single_file(peer_socket, source_node, dest_path, naming_socket))
+        {
+            // printf("done\n");
+            send(naming_socket, "COPY DONE", strlen("COPY DONE"), 0);
+        }
+        else
+        {
+            // printf("fail\n");
+            send(naming_socket, " \033[1;31mERROR 45:\033[0m \033[38;5;214mDirectory copy failed!\033[0m\n\0", strlen(" \033[1;31mERROR 45:\033[0m \033[38;5;214mDirectory copy failed!\033[0m\n\0"), 0);
+        }
     }
     else if (source_node->type == DIRECTORY_NODE)
     {
@@ -384,7 +393,7 @@ void copy_files_to_peer(const char *source_path, const char *dest_path, const ch
         else
         {
             // printf("fail\n");
-            send(naming_socket, "DIRECTRIX COPY FAILED", strlen("DIRECTRIX COPY FAILED"), 0);
+            send(naming_socket, " \033[1;31mERROR 45:\033[0m \033[38;5;214mDirectory copy failed!\033[0m\n\0", strlen(" \033[1;31mERROR 45:\033[0m \033[38;5;214mDirectory copy failed!\033[0m\n\0"), 0);
         }
     }
 
@@ -423,12 +432,12 @@ int copy_single_file(int peer_socket, Node *source_node, const char *dest_path, 
         send(peer_socket, "END_OF_FILE\n", strlen("END_OF_FILE\n"), 0);
         memset(buffer, 0 , sizeof(buffer));
         recv(peer_socket, buffer, sizeof(buffer), 0);
-        send(naming_socket, "COPY DONE", strlen("COPY DONE"), 0);
+        // send(naming_socket, "COPY DONE", strlen("COPY DONE"), 0);
         return 1;
     }
     else
     {
-        send(naming_socket, respond, strlen(respond), 0);
+        // send(naming_socket, respond, strlen(respond), 0);
         return 0;
     }
 }

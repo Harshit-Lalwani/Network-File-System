@@ -50,3 +50,7 @@ Adding Nodes: When a node is added to the cache, it is placed at the head of the
 Accessing Nodes: When a node is accessed, it is moved to the head of the list to mark it as recently used. This ensures that the most recently accessed nodes are always at the head of the list.
 Eviction: When the cache exceeds its capacity, the least recently used node (tail) is removed to make space for new nodes.
 This LRU cache implementation ensures efficient access and management of recently used nodes, improving the performance of the naming server by reducing the need to repeatedly search for nodes in the storage servers.
+
+
+- Assumption:
+Also for asynchronous write partial writes handling case , wheneve a client ask for performing the asyn write operation, will send him an apk when the write request will be started  , if asyn write is done then client will receive completed apk , if supppose storage server will go down , then he wont receive the completed apk , so i have a thread that check the time diff between the apk started and completed , if its taking more than 5 sec , i am assuming that ss goes offline and will according infrom the client

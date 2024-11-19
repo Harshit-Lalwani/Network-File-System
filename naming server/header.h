@@ -9,6 +9,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <time.h>
+#include <ifaddrs.h>
 #include <linux/limits.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
@@ -16,6 +17,7 @@
 #include <asm-generic/socket.h>
 #include<stdbool.h>
 #include <pthread.h>
+// #include"lru_cache.h"
 #include <ctype.h>
 #define TABLE_SIZE 10
 #define MAX_COMMAND_LENGTH 10
@@ -28,6 +30,11 @@
 #define MAX_BUFFER_SIZE 100001
 #define PATH_SEPARATOR "/"
 #define LOG_FILE "naming_server.log"
+
+extern pthread_mutex_t log_mutex;
+extern void log_message(const char *ip, int port, const char *role, const char *message);
+extern void get_ip_and_port(struct sockaddr_in *sa, char *ip_buffer, int *port);
+extern const char *log_file_path;
 
 #define ACK_RECEIVE_PORT 9091 // Dedicated port for receiving ACKs
 
@@ -74,6 +81,7 @@ typedef struct Node
 typedef struct StorageServer
 {
     char ip[16];
+    int id;
     int nm_port;
     int client_port;
     Node *root;
@@ -109,27 +117,22 @@ typedef struct StorageServerList
     struct StorageServerList *next;
 } StorageServerList;
 
-// typedef struct CacheNode
-// {
-//     Node *node;
-//     char *key;
-//     struct CacheNode *prev;
-//     struct CacheNode *next;
-// } CacheNode;
+typedef struct AsyncWriteState
+{
+    char fileName[256];
+    int clientId;
+    char clientIP[INET_ADDRSTRLEN];
+    int clientPort;
+    char status[10];  // "STARTED" or "COMPLETED"
+    time_t timestamp; // To track when the message was received
+    struct AsyncWriteState *next;
+} AsyncWriteState;
 
-// typedef struct LRUCache
-// {
-//     int capacity;
-//     int size;
-//     CacheNode *head;
-//     CacheNode *tail;
-//     CacheNode **hashTable;
-// } LRUCache;
+extern AsyncWriteState *writeStateQueue; // Head of the queue
+extern pthread_mutex_t queueMutex;
 
-// LRUCache *createLRUCache(int capacity);
-// void freeLRUCache(LRUCache *cache);
-// Node *getLRUCache(LRUCache *cache, const char *key);
-// void putLRUCache(LRUCache *cache, const char *key, Node *node);
+void updateWriteStateQueue(const char *status, const char *fileName, int clientId, const char *clientIP, int clientPort);
+void *monitorWriteStates(void *arg);
 unsigned int hash(const char *str);
 NodeTable *createNodeTable();
 Node *createNode(const char *name, NodeType type, Permissions perms, const char *dataLocation);
@@ -164,5 +167,5 @@ void recursiveList(Node *node, const char *current_path, char *response, int *re
 void copyDirectoryContents(Node *sourceDir, Node *destDir);
 void *ackListener(void *arg);
 void forwardAckToClient(const char *clientIP, int clientPort, const char *ack_message);
-void logEvent(const char *level, const char *ip, int port, const char *message);
+// void logEvent(const char *level, const char *ip, int port, const char *message);
 #endif

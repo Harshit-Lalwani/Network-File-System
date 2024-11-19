@@ -321,11 +321,13 @@ int copyNode(Node *sourceNode, Node *destDir, const char *newName)
         close(destFd);
 
         // Create node in our file system
-        Node *newFile = createNode(newName ? newName : sourceNode->name,
-                                   FILE_NODE, sourceNode->permissions, destPath);
+        Node *newFile = createNode(newName ? newName : sourceNode->name,FILE_NODE, sourceNode->permissions, destPath);
         newFile->parent = destDir;
         insertNode(destDir->children, newFile);
     }
 
     return 0;
 }
+
+
+

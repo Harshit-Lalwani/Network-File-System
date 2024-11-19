@@ -5,13 +5,30 @@ Node *receiveNodeChain(int sock)
     Node *head = NULL;
     Node *current = NULL;
 
+    	struct sockaddr_in addr;
+    	socklen_t addr_len = sizeof(addr);
+    
+	// Now, let's log the action (get client's IP and port)
+    	if (getpeername(sock, (struct sockaddr *)&addr, &addr_len) == -1) {
+        perror("getpeername failed");
+        return NULL;
+    	}
+
+    	// Extract the client IP address and port
+    	char t_ip[INET_ADDRSTRLEN];
+    	int t_port;
+    	get_ip_and_port(&addr, t_ip, &t_port);
+
     while (1)
     {
         // Check for end of chain
         int marker;
         if (recv(sock, &marker, sizeof(int), 0) <= 0)
             return NULL;
+        log_message(t_ip, t_port, "Receiving Node Chain:", "Received Marker");
         send(sock, "OK", 2, 0);
+        log_message(t_ip, t_port, "Receiving Node Chain:", "Sent OK");
+
         if (marker == -1)
             break; // End of chain
 
@@ -19,7 +36,11 @@ Node *receiveNodeChain(int sock)
         int name_len;
         if (recv(sock, &name_len, sizeof(int), 0) <= 0)
             return NULL;
+        log_message(t_ip, t_port, "Receiving Node Chain:", "Received name_len");
+
         send(sock, "OK", 2, 0);
+        log_message(t_ip, t_port, "Receiving Node Chain:", "Sent OK");
+
 
         char *name = malloc(name_len);
         if (recv(sock, name, name_len, 0) <= 0)
@@ -27,7 +48,11 @@ Node *receiveNodeChain(int sock)
             free(name);
             return NULL;
         }
+        log_message(t_ip, t_port, "Receiving Node Chain- Received Name::", name);
+
         send(sock, "OK", 2, 0);
+        log_message(t_ip, t_port, "Receiving Node Chain:", "Sent OK");
+
 
         NodeType type;
         Permissions permissions;
@@ -36,14 +61,22 @@ Node *receiveNodeChain(int sock)
             free(name);
             return NULL;
         }
+        log_message(t_ip, t_port, "Receiving Node Chain:", "Received NodeType");
+
         send(sock, "OK", 2, 0);
+        log_message(t_ip, t_port, "Receiving Node Chain:", "Sent OK");
+
 
         if (recv(sock, &permissions, sizeof(Permissions), 0) <= 0)
         {
             free(name);
             return NULL;
         }
+        log_message(t_ip, t_port, "Receiving Node Chain:", "Received Permissions");
+
         send(sock, "OK", 2, 0);
+        log_message(t_ip, t_port, "Receiving Node Chain:", "Sent OK");
+
 
         int loc_len;
         if (recv(sock, &loc_len, sizeof(int), 0) <= 0)
@@ -51,7 +84,11 @@ Node *receiveNodeChain(int sock)
             free(name);
             return NULL;
         }
+        log_message(t_ip, t_port, "Receiving Node Chain:", "Received loc_len");
+
         send(sock, "OK", 2, 0);
+        log_message(t_ip, t_port, "Receiving Node Chain:", "Sent OK");
+
 
         char *dataLocation = malloc(loc_len);
         if (recv(sock, dataLocation, loc_len, 0) <= 0)
@@ -60,7 +97,11 @@ Node *receiveNodeChain(int sock)
             free(dataLocation);
             return NULL;
         }
+        log_message(t_ip, t_port, "Receiving Node Chain- Received dataLoaction:", dataLocation);
+        
         send(sock, "OK", 2, 0);
+        log_message(t_ip, t_port, "Receiving Node Chain:", "Sent OK");
+
 
         // Create new node
         Node *newNode = createNode(name, type, permissions, dataLocation);
@@ -74,7 +115,11 @@ Node *receiveNodeChain(int sock)
             freeNode(newNode);
             return NULL;
         }
+        log_message(t_ip, t_port, "Receiving Node Chain:", "Received has_children");
+
         send(sock, "OK", 2, 0);
+        log_message(t_ip, t_port, "Receiving Node Chain:", "Sent OK");
+
 
         if (has_children)
         {
@@ -114,86 +159,123 @@ Node *receiveNodeChain(int sock)
 
 void *ackListener(void *arg)
 {
-    int ns_sock, client_sock;
-    struct sockaddr_in ns_addr, client_addr;
-    char buffer[1024];
-    socklen_t addr_len = sizeof(client_addr);
-    char clientIP[INET_ADDRSTRLEN];
-    int clientPort;
+    int server_socket, client_socket;
+    struct sockaddr_in server_addr, client_addr;
+    socklen_t client_addr_len = sizeof(client_addr);
+    char buffer[MAX_BUFFER_SIZE];
 
-    // Create socket for receiving ACKs from the storage server
-    ns_sock = socket(AF_INET, SOCK_STREAM, 0);
-    if (ns_sock < 0)
+    // Create a socket
+    if ((server_socket = socket(AF_INET, SOCK_STREAM, 0)) < 0)
     {
         perror("Socket creation failed");
-        return NULL;
+        exit(EXIT_FAILURE);
     }
 
-    ns_addr.sin_family = AF_INET;
-    ns_addr.sin_port = htons(ACK_PORT);
-    ns_addr.sin_addr.s_addr = INADDR_ANY;
+    // Set socket options
+    int opt = 1;
+    if (setsockopt(server_socket, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)) < 0)
+    {
+        perror("setsockopt failed");
+        close(server_socket);
+        exit(EXIT_FAILURE);
+    }
 
-    if (bind(ns_sock, (struct sockaddr *)&ns_addr, sizeof(ns_addr)) < 0)
+    // Bind the socket to the specified port
+    memset(&server_addr, 0, sizeof(server_addr));
+    server_addr.sin_family = AF_INET;
+    server_addr.sin_addr.s_addr = INADDR_ANY;
+    server_addr.sin_port = htons(ACK_PORT);
+
+    if (bind(server_socket, (struct sockaddr *)&server_addr, sizeof(server_addr)) < 0)
     {
         perror("Binding failed");
-        close(ns_sock);
-        return NULL;
+        close(server_socket);
+        exit(EXIT_FAILURE);
     }
 
-    if (listen(ns_sock, 5) < 0)
+    // Start listening for incoming connections
+    if (listen(server_socket, 5) < 0)
     {
-        perror("Listen failed");
-        close(ns_sock);
-        return NULL;
+        perror("Listening failed");
+        close(server_socket);
+        exit(EXIT_FAILURE);
     }
 
-    printf("Naming Server is listening for ACKs on port %d...\n", ACK_PORT);
+    printf("ACK Listener is running on port %d...\n", ACK_PORT);
 
     while (1)
     {
-        client_sock = accept(ns_sock, (struct sockaddr *)&client_addr, &addr_len);
-        if (client_sock < 0)
+        // Accept a client connection
+        client_socket = accept(server_socket, (struct sockaddr *)&client_addr, &client_addr_len);
+        if (client_socket < 0)
         {
-            perror("Client accept failed");
+            perror("Failed to accept client connection");
+            continue; // Don't exit; keep listening
+        }
+
+        // Receive data from the client
+        memset(buffer, 0, MAX_BUFFER_SIZE);
+        if (recv(client_socket, buffer, MAX_BUFFER_SIZE - 1, 0) < 0)
+        {
+            perror("Failed to receive data");
+            close(client_socket);
             continue;
         }
-        memset(buffer, 0 , sizeof(buffer));
-        // Receive ACK from the storage server
-        ssize_t recv_size = recv(client_sock, buffer, sizeof(buffer) - 1, 0);
-        if (recv_size > 0)
+
+        // Process the received acknowledgment
+        int clientId, clientPort;
+        char clientIP[INET_ADDRSTRLEN];
+        char fileName[256];
+
+        if (strstr(buffer, "started"))
         {
-            buffer[recv_size] = '\0'; // Null-terminate the received string
-
-            // Parse the acknowledgment message to extract the client IP and port
+            // Extract details and update the queue
             if (sscanf(buffer,
-                       "Acknowledgment from Storage Server:\nClient ID: %*d\nClient IP: %15s\nClient Port: %d",
-                       clientIP, &clientPort) == 2)
+                       "Start Message from Storage Server:\nClient ID: %d\nClient IP: %15s\nClient Port: %d\nFile: %255s",
+                       &clientId, clientIP, &clientPort, fileName) == 4)
             {
-                printf("Received ACK: %s\n", buffer);
-                printf("Extracted Client IP: %s, Client Port: %d\n", clientIP, clientPort);
-
-                // Forward the acknowledgment to the correct client
-                forwardAckToClient(clientIP, clientPort, buffer);
+                updateWriteStateQueue("STARTED", fileName, clientId, clientIP, clientPort);
+                printf("Updated queue with STARTED message for file: %s\n", fileName);
+                 char ack_message[MAX_BUFFER_SIZE];
+                snprintf(ack_message, MAX_BUFFER_SIZE, "ACK: Write STARTED for file: %s", fileName);
+                forwardAckToClient(clientIP, clientPort, ack_message);
             }
             else
             {
-                fprintf(stderr, "Failed to parse client details from acknowledgment: %s\n", buffer);
+                fprintf(stderr, "Failed to parse STARTED message\n");
+            }
+        }
+        else if (strstr(buffer, "completed"))
+        {
+            // Extract details and update the queue
+            if (sscanf(buffer,
+                       "End Message from Storage Server:\nClient ID: %d\nClient IP: %15s\nClient Port: %d\nFile: %255s",
+                       &clientId, clientIP, &clientPort, fileName) == 4)
+            {
+                updateWriteStateQueue("COMPLETED", fileName, clientId, clientIP, clientPort);
+                printf("Updated queue with COMPLETED message for file: %s\n", fileName);
+                char ack_message[MAX_BUFFER_SIZE];
+                snprintf(ack_message, MAX_BUFFER_SIZE, "ACK: Write COMPLETED for file: %s", fileName);
+                forwardAckToClient(clientIP, clientPort, ack_message);
+            }
+            else
+            {
+                fprintf(stderr, "Failed to parse COMPLETED message\n");
             }
         }
         else
         {
-            perror("Failed to receive acknowledgment");
+            fprintf(stderr, "Unknown message received: %s\n", buffer);
         }
 
-        // Close the client socket after processing
-        shutdown(client_sock, SHUT_WR);
-        close(client_sock);
+        // Close the client socket
+        close(client_socket);
     }
 
-    close(ns_sock);
+    // Close the server socket (unreachable in this implementation)
+    close(server_socket);
     return NULL;
 }
-
 void forwardAckToClient(const char *clientIP, int clientPort, const char *ack_message)
 {
     int client_sock;
@@ -201,11 +283,12 @@ void forwardAckToClient(const char *clientIP, int clientPort, const char *ack_me
 
     // Setup client address based on parsed IP and port
     client_addr.sin_family = AF_INET;
-    client_addr.sin_port = htons(ACK_RECEIVE_PORT);
+    client_addr.sin_port = htons(clientPort);
 
     if (inet_pton(AF_INET, clientIP, &client_addr.sin_addr) <= 0)
     {
         fprintf(stderr, "Invalid client IP address: %s\n", clientIP);
+        log_message(NULL, 0, "Client", "Invalid client IP address");
         return;
     }
 
@@ -231,6 +314,7 @@ void forwardAckToClient(const char *clientIP, int clientPort, const char *ack_me
     }
     else
     {
+        log_message(clientIP, clientPort, "Client - Forwarded ACK to client:", ack_message);
         printf("Acknowledgment forwarded to client %s:%d\n", clientIP, clientPort);
     }
 
@@ -333,6 +417,7 @@ Node *findNode(Node *root, const char *path)
     if (!root || !path || strlen(path) == 0)
     {
         printf("Error: Invalid root or path.\n");
+        log_message(NULL, 0, "FindNode", "Error: Invalid root or path.");
         return NULL;
     }
 
@@ -354,6 +439,8 @@ Node *findNode(Node *root, const char *path)
         if (!childrenTable)
         {
             printf("Error: Path component '%s' not found (no children).\n", token);
+            log_message(NULL, 0, "FindNode", "Error: Path component not found (no children).");
+
             free(pathCopy);
             return NULL;
         }
@@ -379,6 +466,8 @@ Node *findNode(Node *root, const char *path)
         if (!child)
         {
             printf("Error: Path component '%s' not found.\n", token);
+            log_message(NULL, 0, "FindNode", "Error: Path component not found (no children).");
+
             free(pathCopy);
             return NULL;
         }
@@ -408,6 +497,7 @@ void copyDirectoryContents(Node *sourceDir, Node *destDir)
     if (!sourceDir || !destDir || sourceDir->type != DIRECTORY_NODE || destDir->type != DIRECTORY_NODE)
     {
         printf("Error: Invalid source or destination directory\n");
+        
         return;
     }
 
@@ -437,3 +527,82 @@ void copyDirectoryContents(Node *sourceDir, Node *destDir)
     }
 }
 
+void updateWriteStateQueue(const char *status, const char *fileName, int clientId, const char *clientIP, int clientPort) {
+    pthread_mutex_lock(&queueMutex);
+
+    // Search for an existing entry for the file
+    AsyncWriteState *current = writeStateQueue;
+    AsyncWriteState *prev = NULL;
+    while (current) {
+        if (strcmp(current->fileName, fileName) == 0 && current->clientId == clientId) {
+            break;
+        }
+        prev = current;
+        current = current->next;
+    }
+
+    if (current) {
+        // Update existing entry
+        strncpy(current->status, status, sizeof(current->status));
+        current->status[sizeof(current->status) - 1] = '\0';
+        current->timestamp = time(NULL);
+    } else {
+        // Create a new entry
+        AsyncWriteState *newState = (AsyncWriteState *)malloc(sizeof(AsyncWriteState));
+        if (!newState) {
+            perror("Failed to allocate memory for write state");
+            pthread_mutex_unlock(&queueMutex);
+            return;
+        }
+        strncpy(newState->fileName, fileName, sizeof(newState->fileName));
+        newState->fileName[sizeof(newState->fileName) - 1] = '\0';
+        newState->clientId = clientId;
+        strncpy(newState->clientIP, clientIP, sizeof(newState->clientIP));
+        newState->clientIP[sizeof(newState->clientIP) - 1] = '\0';
+        newState->clientPort = clientPort;
+        strncpy(newState->status, status, sizeof(newState->status));
+        newState->status[sizeof(newState->status) - 1] = '\0';
+        newState->timestamp = time(NULL);
+        newState->next = NULL;
+
+        // Add to the queue
+        if (!writeStateQueue) {
+            writeStateQueue = newState;
+        } else {
+            prev->next = newState;
+        }
+    }
+
+    pthread_mutex_unlock(&queueMutex);
+}
+
+void *monitorWriteStates(void *arg) {
+    while (1) {
+        pthread_mutex_lock(&queueMutex);
+        time_t currentTime = time(NULL);
+
+        AsyncWriteState *current = writeStateQueue;
+        while (current) {
+            if (strcmp(current->status, "STARTED") == 0 && difftime(currentTime, current->timestamp) > 10) {
+                printf("Warning: Write operation for file '%s' not completed within 10 seconds.\n", current->fileName);
+
+                // Notify the client about the delayed write
+                char delayedAckMessage[MAX_BUFFER_SIZE];
+                snprintf(delayedAckMessage, MAX_BUFFER_SIZE,
+                         "WARNING: Write operation for file '%s' is aborted since ss goes offline.", current->fileName);
+                forwardAckToClient(current->clientIP, current->clientPort, delayedAckMessage);
+
+                // Optionally, trigger a recheck with the storage server
+                // This could be a function like `checkStorageServerState(current->fileName)`
+                printf("Notified client %s:%d about ss offline for file '%s'.\n",
+                       current->clientIP, current->clientPort, current->fileName);
+            }
+
+            current = current->next;
+        }
+
+        pthread_mutex_unlock(&queueMutex);
+        sleep(5); // Check every 5 seconds
+    }
+    return NULL;
+}

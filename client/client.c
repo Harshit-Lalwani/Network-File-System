@@ -12,12 +12,10 @@
 #include <pthread.h>
 
 #define MAX_BUFFER_SIZE 100001
-#define SERVER_PORT 8080
-#define SERVER_IP "127.0.0.1" // Change this to your server's IP
 #define ACK_RECEIVE_PORT 9091 // Dedicated port for receiving ACKs
 int ack_socket;               // Declare globally to be accessed by both functions
 struct sockaddr_in ack_addr;
-
+int ack_port;
 void displayHelp()
 {
     printf("\nAvailable commands:\n");
@@ -85,7 +83,7 @@ void initializeAckSocket()
 
     // Set up the acknowledgment socket address
     ack_addr.sin_family = AF_INET;
-    ack_addr.sin_port = htons(ACK_RECEIVE_PORT);
+    ack_addr.sin_port = 0; // Dynamic port assignment
     ack_addr.sin_addr.s_addr = INADDR_ANY;
 
     // Bind the socket to the address and port
@@ -96,6 +94,18 @@ void initializeAckSocket()
         exit(-1);
     }
 
+    // Retrieve the dynamically assigned port
+    socklen_t addr_len = sizeof(ack_addr);
+    if (getsockname(ack_socket, (struct sockaddr *)&ack_addr, &addr_len) < 0)
+    {
+        perror("getsockname failed");
+        close(ack_socket);
+        exit(-1);
+    }
+    ack_port = ntohs(ack_addr.sin_port); // Store the port in global variable
+
+    printf("Acknowledgment socket initialized on port: %d\n", ack_port);
+
     // Start listening for incoming ACKs
     if (listen(ack_socket, 1) < 0)
     {
@@ -103,39 +113,42 @@ void initializeAckSocket()
         close(ack_socket);
         exit(-1);
     }
-
-    printf("Client is listening for ACKs on port %d...\n", ACK_RECEIVE_PORT);
 }
 pthread_t ack_thread;
 
 void *ackReceiver(void *arg)
 {
-    int new_sock;
-    struct sockaddr_in client_addr;
-    socklen_t addr_len = sizeof(client_addr);
-    char buffer[1024];
+    while (1)
+    {
+        int new_sock;
+        struct sockaddr_in client_addr;
+        socklen_t addr_len = sizeof(client_addr);
+        char buffer[1024];
 
-    // Accept the incoming connection from the naming server
-    new_sock = accept(ack_socket, (struct sockaddr *)&client_addr, &addr_len);
-    if (new_sock < 0)
-    {
-        perror("Failed to accept ACK connection");
-        return NULL;
-    }
-    memset(buffer, 0 , sizeof(buffer));
-    // Receive the acknowledgment message
-    ssize_t recv_size = recv(new_sock, buffer, sizeof(buffer) - 1, 0);
-    if (recv_size > 0)
-    {
-        buffer[recv_size] = '\0'; // Null-terminate the received message
-        printf("Received ACK: %s\n", buffer);
-    }
-    else
-    {
-        perror("Failed to receive acknowledgment");
+        // Accept the incoming connection from the naming server
+        new_sock = accept(ack_socket, (struct sockaddr *)&client_addr, &addr_len);
+        if (new_sock < 0)
+        {
+            perror("Failed to accept ACK connection");
+            continue;
+        }
+
+        memset(buffer, 0, sizeof(buffer));
+        // Receive the acknowledgment message
+        ssize_t recv_size = recv(new_sock, buffer, sizeof(buffer) - 1, 0);
+        if (recv_size > 0)
+        {
+            buffer[recv_size] = '\0'; // Null-terminate the received message
+            printf("Received ACK: %s\n", buffer);
+        }
+        else
+        {
+            perror("Failed to receive acknowledgment");
+        }
+
+        close(new_sock); // Close the socket after handling the ACK
     }
 
-    close(new_sock);
     return NULL;
 }
 
@@ -175,65 +188,12 @@ void handleRead(int sock, const char *command)
     }
     else
     {
-        printf("Error: %s", buffer);
+        printf("%s", buffer+1);
+        printf("\033[0m");
+
     }
 }
 
-// void handleWrite(int sock, const char *command)
-// {
-//     char buffer[MAX_BUFFER_SIZE];
-//     char filepath[256];
-//     FILE *file;
-
-//     // Extract filepath from command
-//     sscanf(command, "WRITE %s", filepath);
-
-//     // Open local file
-//     file = fopen(filepath, "rb");
-//     if (!file)
-//     {
-//         printf("Error: Cannot open local file %s\n", filepath);
-//         return;
-//     }
-
-//     // Get file size
-//     fseek(file, 0, SEEK_END);
-//     long fileSize = ftell(file);
-//     fseek(file, 0, SEEK_SET);
-
-//     // Send command to server
-//     send(sock, command, strlen(command), 0);
-
-//     // Send file size
-//     snprintf(buffer, sizeof(buffer), "FILE_SIZE:%ld", fileSize);
-//     send(sock, buffer, strlen(buffer), 0);
-
-//     // Wait for server acknowledgment
-//     recv(sock, buffer, sizeof(buffer), 0);
-//     if (strcmp(buffer, "READY_TO_RECEIVE\n") != 0)
-//     {
-//         printf("Error: Server not ready to receive\n");
-//         fclose(file);
-//         return;
-//     }
-
-//     // Send file content in chunks
-//     size_t bytes_read;
-//     while ((bytes_read = fread(buffer, 1, sizeof(buffer), file)) > 0)
-//     {
-//         if (send(sock, buffer, bytes_read, 0) != bytes_read)
-//         {
-//             printf("Error sending file data\n");
-//             break;
-//         }
-//     }
-
-//     fclose(file);
-
-//     // Receive confirmation
-//     recv(sock, buffer, sizeof(buffer), 0);
-//     printf("%s", buffer);
-// }
 
 void handleWrite(int sock, const char *command)
 {
@@ -270,7 +230,9 @@ void handleWrite(int sock, const char *command)
         {
             if (ferror(stdin))
             {
-                printf("Error reading input\n");
+                printf(" \033[1;31mERROR: 34\033[0m \033[38;5;214mUnable to Read input\033[0m\n\0");
+        printf("\033[0m");
+
                 return;
             }
             break; // EOF reached
@@ -301,7 +263,7 @@ void handleWrite(int sock, const char *command)
     recv(sock, buffer, sizeof(buffer), 0);
     // Send content size
     memset(buffer,0, sizeof(buffer));
-    snprintf(buffer, sizeof(buffer), "FILE_SIZE:%ld", contentSize);
+    snprintf(buffer, sizeof(buffer), "FILE_SIZE:%ld|ACK_PORT:%d", contentSize,ack_port);
     send(sock, buffer, strlen(buffer), 0);
     // recv(sock, buffer, sizeof(buffer), 0);
 
@@ -317,7 +279,10 @@ void handleWrite(int sock, const char *command)
 
     if (strcmp(buffer, "READY_TO_RECEIVE\n") != 0)
     {
-        printf("Error: Server not ready to receive\n");
+        printf("%s", buffer+1);
+        printf("\033[0m");
+        memset(buffer,0, strlen(buffer));
+        memset(content,0,strlen(content));
         return;
     }
 
@@ -434,7 +399,9 @@ void handleStream(int sock, const char *command)
     }
     else
     {
-        printf("Error: %s", buffer);
+        printf("%s", buffer+1);
+        printf("\033[0m");
+
     }
 
     close(pipe_fd[1]);
@@ -454,8 +421,11 @@ struct ServerInfo connect_naming_server(int sock, char *command)
     recv(sock, buffer, sizeof(buffer), 0);
 
     // Check if path not found
-    if (strcmp(buffer, "Path not found in any storage server") == 0)
+    if (buffer[0] == ' ')
     {
+        printf("%s", buffer+1);
+        printf("\033[0m");
+        fflush(stdout);
         return server; // Return with null port (0)
     }
 
@@ -463,15 +433,28 @@ struct ServerInfo connect_naming_server(int sock, char *command)
     printf("%d %s", server.port, server.ip);
     return server;
 }
-int main()
+int main(int argc, char *argv[])
 {
-    int naming_sock = connectToServer(SERVER_IP, 8081);
+    if (argc != 3)
+    {
+        fprintf(stderr, "Usage: %s <IP Address> <Port>\n", argv[0]);
+        exit(EXIT_FAILURE);
+    }
+
+    // Parse IP address and port from command-line arguments
+    const char *ip_address = argv[1];
+    int port = atoi(argv[2]);
+    if (port <= 0 || port > 65535)
+    {
+        fprintf(stderr, "Invalid port number. Please enter a value between 1 and 65535.\n");
+        exit(EXIT_FAILURE);
+    }
+    int naming_sock = connectToServer(ip_address, port);
     if (naming_sock < 0)
     {
         return 1;
     }
-
-    printf("Connected to server at %s:%d\n", SERVER_IP, 8081);
+    printf("Connected to server at %s:%d\n", ip_address, port);
     displayHelp();
 
     initializeAckSocket();
@@ -513,7 +496,6 @@ int main()
             struct ServerInfo storage_server = connect_naming_server(naming_sock, command);
             if (storage_server.port == 0)
             {
-                printf("Path not found in any storage server\n");
                 continue;
             }
             int storage_sock = connectToServer(storage_server.ip, storage_server.port);
@@ -529,7 +511,6 @@ int main()
             struct ServerInfo storage_server = connect_naming_server(naming_sock, command);
             if (storage_server.port == 0)
             {
-                printf("Path not found in any storage server\n");
                 continue;
             }
             int storage_sock = connectToServer(storage_server.ip, storage_server.port);
@@ -545,7 +526,6 @@ int main()
             struct ServerInfo storage_server = connect_naming_server(naming_sock, command);
             if (storage_server.port == 0)
             {
-                printf("Path not found in any storage server\n");
                 continue;
             }
             int storage_sock = connectToServer(storage_server.ip, storage_server.port);
@@ -561,7 +541,6 @@ int main()
             struct ServerInfo storage_server = connect_naming_server(naming_sock, command);
             if (storage_server.port == 0)
             {
-                printf("Path not found in any storage server\n");
                 continue;
             }
             int storage_sock = connectToServer(storage_server.ip, storage_server.port);
@@ -577,7 +556,10 @@ int main()
             char respond[100001];
             send(naming_sock, command, strlen(command), 0);
             memset(respond,0, sizeof(respond));
-            recv(naming_sock, respond, sizeof(respond), 0);
+            if(recv(naming_sock, respond, sizeof(respond), 0)<0)
+            {
+                perror("rec client");
+            }
             printf("%s\n", respond);
         }
         else if (strncmp(command, "DELETE ", 7) == 0)
@@ -619,7 +601,12 @@ int main()
         }
         else
         {
-            printf("Invalid command. Type HELP for available commands.\n");
+            // printf("Invalid command. Type HELP for available commands.\n");
+            char respond[100001];
+            send(naming_sock, command, strlen(command), 0);
+            memset(respond,0, sizeof(respond));
+            recv(naming_sock, respond, sizeof(respond), 0);
+            printf("%s\n", respond);
         }
     }
 
@@ -627,4 +614,3 @@ int main()
     printf("Connection closed.\n");
     return 0;
 }
-

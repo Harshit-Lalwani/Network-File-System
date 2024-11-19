@@ -12,6 +12,7 @@ static unsigned int hashKey(const char *key) {
 }
 
 LRUCache *createLRUCache(int capacity) {
+    printf("Creating cache\n");
     LRUCache *cache = (LRUCache *)malloc(sizeof(LRUCache));
     cache->capacity = capacity;
     cache->size = 0;
@@ -22,6 +23,7 @@ LRUCache *createLRUCache(int capacity) {
 }
 
 void freeLRUCache(LRUCache *cache) {
+    printf("Freeing cache\n");
     CacheNode *current = cache->head;
     while (current) {
         CacheNode *next = current->next;
@@ -34,6 +36,7 @@ void freeLRUCache(LRUCache *cache) {
 }
 
 static void moveToHead(LRUCache *cache, CacheNode *node) {
+    printf("Moving to head\n");
     if (node == cache->head) return;
     if (node->prev) node->prev->next = node->next;
     if (node->next) node->next->prev = node->prev;
@@ -46,6 +49,7 @@ static void moveToHead(LRUCache *cache, CacheNode *node) {
 }
 
 static void removeTail(LRUCache *cache) {
+    printf("Removing tail\n");
     if (!cache->tail) return;
     CacheNode *tail = cache->tail;
     if (tail->prev) tail->prev->next = NULL;
@@ -59,19 +63,31 @@ static void removeTail(LRUCache *cache) {
 }
 
 Node *getLRUCache(LRUCache *cache, const char *key) {
+    printf("Getting cache\n");
+    
     unsigned int index = hashKey(key);
     CacheNode *node = cache->hashTable[index];
+
+    int flag = 0;
+    
     while (node) {
         if (strcmp(node->key, key) == 0) {
-            moveToHead(cache, node);
+            if(flag)
+            {
+                moveToHead(cache, node);
+            }
+            printCache(cache);
             return node->node;
         }
         node = node->next;
+        flag ++;
     }
+    printCache(cache);
     return NULL;
 }
 
 void putLRUCache(LRUCache *cache, const char *key, Node *node) {
+    printf("Putting cache\n");
     unsigned int index = hashKey(key);
     CacheNode *existingNode = cache->hashTable[index];
     while (existingNode) {
@@ -94,5 +110,14 @@ void putLRUCache(LRUCache *cache, const char *key, Node *node) {
     cache->size++;
     if (cache->size > cache->capacity) {
         removeTail(cache);
+    }
+}
+
+void printCache(LRUCache *cache) {
+    printf("Printing cache\n");
+    CacheNode *current = cache->head;
+    while (current) {
+        printf("Key: %s\n", current->key);
+        current = current->next;
     }
 }

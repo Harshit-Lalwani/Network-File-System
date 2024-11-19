@@ -1,4 +1,4 @@
-#include"header.h"
+#include "header.h"
 
 ssize_t readFile(Node *fileNode, char *buffer, size_t size)
 {
@@ -190,22 +190,22 @@ int deleteNode(Node *node)
     }
 
     // Remove the physical file or directory
-    if (node->type == DIRECTORY_NODE)
-    {
-        if (rmdir(node->dataLocation) != 0)
-        {
-            perror("Error deleting directory");
-            return -1;
-        }
-    }
-    else
-    {
-        if (unlink(node->dataLocation) != 0)
-        {
-            perror("Error deleting file");
-            return -1;
-        }
-    }
+    // if (node->type == DIRECTORY_NODE)
+    // {
+    //     if (rmdir(node->dataLocation) != 0)
+    //     {
+    //         perror("Error deleting directory");
+    //         return -1;
+    //     }
+    // }
+    // else
+    // {
+    //     if (unlink(node->dataLocation) != 0)
+    //     {
+    //         perror("Error deleting file");
+    //         return -1;
+    //     }
+    // }
 
     // Remove node from parent's hash table
     unsigned int index = hash(node->name);
@@ -321,13 +321,10 @@ int copyNode(Node *sourceNode, Node *destDir, const char *newName)
         close(destFd);
 
         // Create node in our file system
-        Node *newFile = createNode(newName ? newName : sourceNode->name,FILE_NODE, sourceNode->permissions, destPath);
+        Node *newFile = createNode(newName ? newName : sourceNode->name, FILE_NODE, sourceNode->permissions, destPath);
         newFile->parent = destDir;
         insertNode(destDir->children, newFile);
     }
 
     return 0;
 }
-
-
-

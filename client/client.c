@@ -188,12 +188,10 @@ void handleRead(int sock, const char *command)
     }
     else
     {
-        printf("%s", buffer+1);
+        printf("%s", buffer + 1);
         printf("\033[0m");
-
     }
 }
-
 
 void handleWrite(int sock, const char *command)
 {
@@ -231,7 +229,7 @@ void handleWrite(int sock, const char *command)
             if (ferror(stdin))
             {
                 printf(" \033[1;31mERROR: 34\033[0m \033[38;5;214mUnable to Read input\033[0m\n\0");
-        printf("\033[0m");
+                printf("\033[0m");
 
                 return;
             }
@@ -259,15 +257,15 @@ void handleWrite(int sock, const char *command)
 
     // Send command to server
     send(sock, command, strlen(command), 0);
-    memset(buffer,0, sizeof(buffer));
+    memset(buffer, 0, sizeof(buffer));
     recv(sock, buffer, sizeof(buffer), 0);
     // Send content size
-    memset(buffer,0, sizeof(buffer));
-    snprintf(buffer, sizeof(buffer), "FILE_SIZE:%ld|ACK_PORT:%d", contentSize,ack_port);
+    memset(buffer, 0, sizeof(buffer));
+    snprintf(buffer, sizeof(buffer), "FILE_SIZE:%ld|ACK_PORT:%d", contentSize, ack_port);
     send(sock, buffer, strlen(buffer), 0);
     // recv(sock, buffer, sizeof(buffer), 0);
 
-    memset(buffer,0, sizeof(buffer));
+    memset(buffer, 0, sizeof(buffer));
     // Wait for server acknowledgment
     ssize_t recv_size = recv(sock, buffer, sizeof(buffer), 0);
     if (recv_size <= 0)
@@ -279,10 +277,10 @@ void handleWrite(int sock, const char *command)
 
     if (strcmp(buffer, "READY_TO_RECEIVE\n") != 0)
     {
-        printf("%s", buffer+1);
+        printf("%s", buffer + 1);
         printf("\033[0m");
-        memset(buffer,0, strlen(buffer));
-        memset(content,0,strlen(content));
+        memset(buffer, 0, strlen(buffer));
+        memset(content, 0, strlen(content));
         return;
     }
 
@@ -303,9 +301,9 @@ void handleWrite(int sock, const char *command)
 
         remaining -= sent;
         offset += sent;
-        recv(sock, buffer, sizeof(buffer), 0);      
+        recv(sock, buffer, sizeof(buffer), 0);
     }
-    memset(buffer,0, sizeof(buffer));
+    memset(buffer, 0, sizeof(buffer));
     send(sock, "bruh\0", 5, 0);
 
     // Receive confirmation
@@ -316,18 +314,20 @@ void handleWrite(int sock, const char *command)
         return;
     }
     buffer[recv_size] = '\0';
-    memset(content, 0 , sizeof(content));
+    memset(content, 0, sizeof(content));
     printf("%s", buffer);
+    printf("\033[0m");
 }
 void handleMeta(int sock, const char *command)
 {
     char buffer[MAX_BUFFER_SIZE];
 
     send(sock, command, strlen(command), 0);
-    memset(buffer,0, sizeof(buffer));
+    memset(buffer, 0, sizeof(buffer));
     ssize_t bytes_received = recv(sock, buffer, sizeof(buffer), 0);
     buffer[bytes_received] = '\0';
     printf("%s", buffer);
+    printf("\033[0m");
 }
 
 void handleStream(int sock, const char *command)
@@ -367,7 +367,7 @@ void handleStream(int sock, const char *command)
 
     send(sock, command, strlen(command), 0);
 
-    memset(buffer,0, sizeof(buffer));
+    memset(buffer, 0, sizeof(buffer));
     bytes_received = recv(sock, buffer, sizeof(buffer), 0);
     buffer[bytes_received] = '\0';
 
@@ -399,9 +399,8 @@ void handleStream(int sock, const char *command)
     }
     else
     {
-        printf("%s", buffer+1);
+        printf("%s", buffer + 1);
         printf("\033[0m");
-
     }
 
     close(pipe_fd[1]);
@@ -417,13 +416,13 @@ struct ServerInfo connect_naming_server(int sock, char *command)
 
     send(sock, command, strlen(command), 0);
     char buffer[100001];
-    memset(buffer,0, sizeof(buffer));
+    memset(buffer, 0, sizeof(buffer));
     recv(sock, buffer, sizeof(buffer), 0);
 
     // Check if path not found
     if (buffer[0] == ' ')
     {
-        printf("%s", buffer+1);
+        printf("%s", buffer + 1);
         printf("\033[0m");
         fflush(stdout);
         return server; // Return with null port (0)
@@ -555,28 +554,31 @@ int main(int argc, char *argv[])
         {
             char respond[100001];
             send(naming_sock, command, strlen(command), 0);
-            memset(respond,0, sizeof(respond));
-            if(recv(naming_sock, respond, sizeof(respond), 0)<0)
+            memset(respond, 0, sizeof(respond));
+            if (recv(naming_sock, respond, sizeof(respond), 0) < 0)
             {
                 perror("rec client");
             }
             printf("%s\n", respond);
+            printf("\033[0m");
         }
         else if (strncmp(command, "DELETE ", 7) == 0)
         {
             char respond[100001];
             send(naming_sock, command, strlen(command), 0);
-            memset(respond,0, sizeof(respond));
+            memset(respond, 0, sizeof(respond));
             recv(naming_sock, respond, sizeof(respond), 0);
             printf("%s\n", respond);
+            printf("\033[0m");
         }
         else if (strncmp(command, "COPY ", 5) == 0)
         {
             char respond[100001];
             send(naming_sock, command, strlen(command), 0);
-            memset(respond,0, sizeof(respond));
+            memset(respond, 0, sizeof(respond));
             recv(naming_sock, respond, sizeof(respond), 0);
             printf("%s\n", respond);
+            printf("\033[0m");
         }
         else if (strncmp(command, "LIST", 4) == 0)
         {
@@ -585,7 +587,7 @@ int main(int argc, char *argv[])
             // Send the LIST command to the naming server
             send(naming_sock, command, strlen(command), 0);
 
-            memset(response,0, sizeof(response));
+            memset(response, 0, sizeof(response));
             // Receive the response from the server
             int bytes_received = recv(naming_sock, response, sizeof(response) - 1, 0);
 
@@ -604,9 +606,10 @@ int main(int argc, char *argv[])
             // printf("Invalid command. Type HELP for available commands.\n");
             char respond[100001];
             send(naming_sock, command, strlen(command), 0);
-            memset(respond,0, sizeof(respond));
+            memset(respond, 0, sizeof(respond));
             recv(naming_sock, respond, sizeof(respond), 0);
             printf("%s\n", respond);
+            printf("\033[0m");
         }
     }
 

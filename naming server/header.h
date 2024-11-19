@@ -89,6 +89,8 @@ typedef struct StorageServer
     bool active;
     pthread_mutex_t lock;
     struct StorageServer *next; // For collision handling in storage server hash table
+    StorageServer *ss_backup_1;
+    StorageServer *ss_backup_2;
 } StorageServer;
 
 // Hash table for storage servers
@@ -168,4 +170,7 @@ void copyDirectoryContents(Node *sourceDir, Node *destDir);
 void *ackListener(void *arg);
 void forwardAckToClient(const char *clientIP, int clientPort, const char *ack_message);
 // void logEvent(const char *level, const char *ip, int port, const char *message);
+
+void backup_data(StorageServerTable *server_table);
+int take_backup(StorageServerTable *server_table, StorageServer *server, StorageServer *destination);
 #endif

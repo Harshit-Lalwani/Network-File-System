@@ -148,6 +148,8 @@ StorageServer *findStorageServerByPath2(StorageServerTable *table, const char *p
 StorageServer *handleNewStorageServer(int socket, StorageServerTable *table)
 {
     StorageServer *server = malloc(sizeof(StorageServer));
+    server->ss_backup_1 = NULL;
+    server->ss_backup_2 = NULL;
     server->socket = socket;
     server->active = true;
     pthread_mutex_init(&server->lock, NULL);
@@ -902,7 +904,13 @@ void *storageServerAcceptor(void *arg)
                  "Total storage servers connected: %d\n",
                  server->ip, server->nm_port, server->client_port, (server->root != NULL) ? server->root->name : "No root directory", server_table->count);
         log_message(NULL, 0, "SS", log_buf);
+
+        if(server_table->count >= 3)
+        {
+            backup_data(server_table);
+        }
     }
+
 
     return NULL;
 }

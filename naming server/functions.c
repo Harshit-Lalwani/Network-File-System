@@ -606,3 +606,211 @@ void *monitorWriteStates(void *arg) {
     }
     return NULL;
 }
+
+
+void backup_data(StorageServerTable *server_table)
+{
+    if (!server_table)
+        return;
+    for (int i = 0; i < TABLE_SIZE; i++)
+    {
+        StorageServer *current = server_table->table[i];
+        while (current)
+        {
+            printf("curcscs %s %d\n", current->root->name, current->id);
+            pthread_mutex_lock(&current->lock);
+            if (!current->ss_backup_1 || !current->ss_backup_1->active)
+            {
+                printf("empty\n");
+                StorageServer *backup1 = NULL;
+                int offset = 1;
+                while (!backup1 && offset <= server_table->count)
+                {
+                    printf("offset %d \n", offset);
+                    int backup_id = (current->id - offset + server_table->count) % server_table->count;
+                    if (backup_id != current->id)
+                    {
+                        printf("backup_id%d \n", backup_id);
+                        for (int j = 0; j < TABLE_SIZE; j++)
+                        {
+                            StorageServer *potential_backup = server_table->table[j];
+                            if (current->ss_backup_2)
+                            {
+                                if (potential_backup != current->ss_backup_2)
+                                {
+                                    while (potential_backup)
+                                    {
+                                        if (potential_backup->id == backup_id && potential_backup->active)
+                                        {
+                                            printf("current %s %s\n", current->root->name, potential_backup->root->name);
+                                            int check = take_backup(server_table, current, potential_backup);
+                                            if (check)
+                                            {
+                                                printf("DONE\n");
+                                                backup1 = potential_backup;
+                                                break;
+                                            }
+                                        }
+                                        potential_backup = potential_backup->next;
+                                    }
+                                    if (backup1)
+                                        break;
+                                }
+                            }
+                            else
+                            {
+                                while (potential_backup)
+                                {
+                                    if (potential_backup->id == backup_id && potential_backup->active)
+                                    {
+                                        printf("current %s %s\n", current->root->name, potential_backup->root->name);
+                                        int check = take_backup(server_table, current, potential_backup);
+                                        if (check)
+                                        {
+                                            backup1 = potential_backup;
+                                            break;
+                                        }
+                                    }
+                                    potential_backup = potential_backup->next;
+                                }
+                                if (backup1)
+                                    break;
+                            }
+                        }
+                    }
+                    offset++;
+                }
+                if (backup1)
+                    current->ss_backup_1 = backup1;
+            }
+            if (!current->ss_backup_2 || !current->ss_backup_2->active)
+            {
+                StorageServer *backup2 = NULL;
+                int offset = 1;
+
+                while (!backup2 && offset <= server_table->count)
+                {
+                    int backup_id = (current->id - offset - 1 + server_table->count) % server_table->count;
+                    if (backup_id != current->id)
+                    {
+                        for (int j = 0; j < TABLE_SIZE; j++)
+                        {
+                            StorageServer *potential_backup = server_table->table[j];
+                            if (current->ss_backup_1)
+                            {
+                                if (potential_backup != current->ss_backup_1)
+                                {
+                                    while (potential_backup)
+                                    {
+                                        if (potential_backup->id == backup_id && potential_backup->active)
+                                        {
+                                            printf("current %s %s\n", current->root->name, potential_backup->root->name);
+                                            int check = take_backup(server_table, current, potential_backup);
+                                            if (check)
+                                            {
+                                                backup2 = potential_backup;
+                                                break;
+                                            }
+                                        }
+                                        potential_backup = potential_backup->next;
+                                    }
+                                    if (backup2)
+                                        break;
+                                }
+                            }
+                            else
+                            {
+                                while (potential_backup)
+                                {
+                                    if (potential_backup->id == backup_id && potential_backup->active)
+                                    {
+                                        printf("current %s %s\n", current->root->name, potential_backup->root->name);
+                                        int check = take_backup(server_table, current, potential_backup);
+                                        if (check)
+                                        {
+                                            backup2 = potential_backup;
+                                            break;
+                                        }
+                                    }
+                                    potential_backup = potential_backup->next;
+                                }
+                                if (backup2)
+                                    break;
+                            }
+                        }
+                    }
+                    offset++;
+                }
+                if (backup2)
+                    current->ss_backup_2 = backup2;
+            }
+            pthread_mutex_unlock(&current->lock);
+            current = current->next;
+        }
+    }
+}
+
+int take_backup(StorageServerTable *server_table, StorageServer *server, StorageServer *destination)
+{
+    char response[100001];
+    char path[1024];
+    snprintf(path, sizeof(path), "/backup_%d", server->id);
+    snprintf(response, sizeof(response), "CREATE DIR 1 /backup_%d", server->id);
+    send(destination->socket, response, strlen(response), 0);
+    recv(destination->socket, response, sizeof(response), 0);
+    printf("%s\n", response);
+    if (strncmp(response, "CREATE DONE", 11) == 0)
+    {
+        printf("yeahhh\n");
+        char *lastSlash = strrchr(path, '/');
+        if (!lastSlash)
+        {
+            return 0;
+        }
+        *lastSlash = '\0';
+        char *name = lastSlash + 1;
+        Node *parentDir = searchPath(destination->root, path);
+        *lastSlash = '/';
+        if (!parentDir)
+        {
+            return 0;
+        }
+        NodeType typ = DIRECTORY_NODE;
+        Node *newNode = createNode(name, typ, READ | WRITE, path);
+        newNode->parent = parentDir;
+        insertNode(parentDir->children, newNode);
+        char dest_path[1024];
+        snprintf(dest_path, sizeof(dest_path), "/backup_%d", server->id);
+        snprintf(response, sizeof(response), "COPY / /backup_%d", server->id);
+        send(server->socket, response, strlen(response), 0);
+        recv(server->socket, response, sizeof(response), 0);
+        char server_info[MAX_BUFFER_SIZE];
+        printf("hiiek\n");
+        snprintf(server_info, sizeof(server_info), "SOURCE SERVER_INFO %s %d", destination->ip, destination->client_port);
+        send(server->socket, server_info, strlen(server_info), 0);
+        recv(server->socket, response, sizeof(response), 0);
+        printf("%s\n", response);
+        if (strncmp(response, "COPY DONE", 9) == 0)
+        {
+            if (server->root->type == DIRECTORY_NODE)
+            {
+                printf("%s\n", dest_path);
+                Node *destParentNode = findNode(destination->root, dest_path);
+                if (!destParentNode || destParentNode->type != DIRECTORY_NODE)
+                {
+                    printf("Error: Destination path is not a valid directory\n");
+                    return 0;
+                }
+                addDirectory(destParentNode, server->root->name, server->root->permissions);
+                Node *newRootDir = searchNode(destParentNode->children, server->root->name);
+                copyDirectoryContents(server->root, newRootDir);
+                printf("Backup done\n");
+            }
+            else
+            {
+                Node *destParentNode = findNode(destination->root, dest_path);
+                addFile(destParentNode, server->root->name, server->root->permissions, server->root->dataLocation);
+            }
+        }
+    }
+}

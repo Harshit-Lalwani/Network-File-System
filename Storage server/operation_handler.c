@@ -385,7 +385,7 @@ void processCommand_user(Node *root, char *input, int client_socket)
             if (targetNode->lock_type == 1)
             {
                 printf(" \033[1;31mERROR 52:\033[0m \033[38;5;214mFile is being read\n\0\033[0m");
-                PRINTF(" ");
+                printf(" ");
                 snprintf(response, sizeof(response), "\033[1;31mERROR: 52\033[0m \033[38;5;214mFile is being read\033[0m\n\0");
                 send(client_socket, response, strlen(response), 0);
                 return;

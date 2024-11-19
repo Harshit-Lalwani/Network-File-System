@@ -182,8 +182,8 @@ void *namingServerHandler(void *arg)
             struct sockaddr_in naming_serv_addr;
             naming_server_sock = socket(AF_INET, SOCK_STREAM, 0);
             naming_serv_addr.sin_family = AF_INET;
-            naming_serv_addr.sin_port = htons(8080);
-            inet_pton(AF_INET, "127.0.0.1", &naming_serv_addr.sin_addr);
+            naming_serv_addr.sin_port = info->port;
+            inet_pton(AF_INET, info->ip, &naming_serv_addr.sin_addr);
 
             while (connect(naming_server_sock, (struct sockaddr *)&naming_serv_addr,
                            sizeof(naming_serv_addr)) < 0)
@@ -192,7 +192,7 @@ void *namingServerHandler(void *arg)
             }
 
             // Reregister with naming server
-            if (sendServerInfo(naming_server_sock, "127.0.0.1", PORT, PORT+2, root) < 0)
+            if (sendServerInfo(naming_server_sock, info->ip, info->port, info->client_port, root) < 0)
             {
                 printf("Failed to re-register with naming server\n");
                 continue;
@@ -210,6 +210,7 @@ void *namingServerHandler(void *arg)
 
 void *periodicFlush(void *arg)
 {
+    char* ip=(char*)arg;
     printf("you");
     while (1)
     {
@@ -223,7 +224,7 @@ void *periodicFlush(void *arg)
             pthread_cond_wait(&queueCondition, &queueMutex); // Wait for a signal if the queue is empty
         }
 
-        flushAsyncWrites();                // Call to periodically flush the queue
+        flushAsyncWrites(ip);                // Call to periodically flush the queue
         pthread_mutex_unlock(&queueMutex); // Unlock the mutex after flushing
 
         sleep(1); // Sleep for 1 second before the next flush cycle
@@ -251,11 +252,108 @@ void cleanupAsyncWriter()
     pthread_mutex_unlock(&queueMutex);
 }
 
-// Main function
-int main()
+void get_local_ip(char *ip_buffer, size_t buffer_size)
 {
-    Node *root = createNode("/home/divijhmangtani/Downloads", DIRECTORY_NODE, READ | WRITE | EXECUTE, "/home/divijhmangtani/Downloads");
-    traverseAndAdd(root, "/home/divijhmangtani/Downloads");
+    struct ifaddrs *ifaddr, *ifa;
+    int family;
+
+    if (getifaddrs(&ifaddr) == -1)
+    {
+        perror("getifaddrs");
+        exit(EXIT_FAILURE);
+    }
+
+    for (ifa = ifaddr; ifa != NULL; ifa = ifa->ifa_next)
+    {
+        if (ifa->ifa_addr == NULL)
+            continue;
+
+        family = ifa->ifa_addr->sa_family;
+        if (family == AF_INET)
+        { // IPv4 address
+            if (strcmp(ifa->ifa_name, "lo") != 0)
+            { // Exclude loopback interface
+                inet_ntop(AF_INET, &((struct sockaddr_in *)ifa->ifa_addr)->sin_addr, ip_buffer, buffer_size);
+                freeifaddrs(ifaddr);
+                return;
+            }
+        }
+    }
+    freeifaddrs(ifaddr);
+    strncpy(ip_buffer, "Unknown", buffer_size);
+}
+
+// Main function
+int main(int argc, char *argv[])
+{
+    if (argc != 3)
+    {
+        fprintf(stderr, "Usage: %s <IP Address> <Port>\n", argv[0]);
+        exit(EXIT_FAILURE);
+    }
+
+    // Parse IP address and port from command-line arguments
+    const char *ip_address = argv[1];
+    int port = atoi(argv[2]);
+    if (port <= 0 || port > 65535)
+    {
+        fprintf(stderr, "Invalid port number. Please enter a value between 1 and 65535.\n");
+        exit(EXIT_FAILURE);
+    }
+    int storage_server_sock;
+    struct sockaddr_in storage_serv_addr;
+    storage_server_sock = socket(AF_INET, SOCK_STREAM, 0);
+    if (storage_server_sock < 0)
+    {
+        perror("Socket creation failed");
+        exit(EXIT_FAILURE);
+    }
+    memset(&storage_serv_addr, 0, sizeof(storage_serv_addr));
+    storage_serv_addr.sin_family = AF_INET;
+    storage_serv_addr.sin_addr.s_addr = INADDR_ANY;
+    storage_serv_addr.sin_port =0;
+    int opt = 1;
+    if (setsockopt(storage_server_sock, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)) < 0)
+    {
+        perror("setsockopt failed");
+        exit(EXIT_FAILURE);
+    }
+    if (bind(storage_server_sock, (struct sockaddr *)&storage_serv_addr, sizeof(storage_serv_addr)) < 0)
+    {
+        perror("Bind failed");
+        exit(EXIT_FAILURE);
+    }
+    struct sockaddr_in local_addr;
+    socklen_t addr_len = sizeof(local_addr);
+    if (getsockname(storage_server_sock, (struct sockaddr *)&local_addr, &addr_len) < 0)
+    {
+        perror("getsockname failed");
+        exit(EXIT_FAILURE);
+    }
+    int client_port = ntohs(local_addr.sin_port);
+    // Print the local IP and port assigned to the socket
+    // printf("Storage server is running on IP: %s, Port: %d\n",
+    //    inet_ntoa(local_addr.sin_addr), ntohs(local_addr.sin_port));
+
+    if (listen(storage_server_sock, 100) < 0)
+    {
+        perror("Listen failed");
+        exit(EXIT_FAILURE);
+    }
+    if (pthread_create(&flushThread, NULL, periodicFlush,ip_address) != 0)
+    {
+        perror("Failed to create flush thread");
+        return 1;
+    }
+    pthread_detach(flushThread);
+    char ip_buffer[INET_ADDRSTRLEN];
+    get_local_ip(ip_buffer, sizeof(ip_buffer));
+    // int client_port = ntohs(storage_serv_addr.sin_port); // Store the port in global variable
+
+    printf("Storage server is listening for client connections on port %d...\n", client_port);
+
+    Node *root = createNode("/home/mehulagarwal/Documents/sem1", DIRECTORY_NODE, READ | WRITE | EXECUTE, "/home/mehulagarwal/Documents/sem1");
+    traverseAndAdd(root, "/home/mehulagarwal/Documents/sem1");
     // printFileSystemTree(root,10);
     int naming_server_sock;
     struct sockaddr_in naming_naming_serv_addr;
@@ -267,8 +365,8 @@ int main()
         exit(EXIT_FAILURE);
     }
     naming_serv_addr.sin_family = AF_INET;
-    naming_serv_addr.sin_port = htons(PORT);
-    if (inet_pton(AF_INET, "127.0.0.1", &naming_serv_addr.sin_addr) <= 0)
+    naming_serv_addr.sin_port = htons(port);
+    if (inet_pton(AF_INET, ip_address, &naming_serv_addr.sin_addr) <= 0)
     {
         perror("Invalid address or address not supported");
         exit(EXIT_FAILURE);
@@ -286,7 +384,8 @@ int main()
             break;
         }
     }
-    if (sendServerInfo(naming_server_sock, "127.0.0.1", PORT, PORT+2, root) < 0)
+
+    if (sendServerInfo(naming_server_sock, ip_buffer, port, client_port, root) < 0)
     {
         printf("Failed to send server information\n");
     }
@@ -298,48 +397,16 @@ int main()
     struct ClientData *server_info = malloc(sizeof(struct ClientData));
     server_info->socket = naming_server_sock;
     server_info->root = root;
+    server_info->client_port = client_port;
+    server_info->port = port;
+    server_info->ip = ip_address;
     if (pthread_create(&naming_server_thread, NULL, namingServerHandler, server_info) != 0)
     {
         perror("Failed to create naming server handler thread");
         exit(EXIT_FAILURE);
     }
     pthread_detach(naming_server_thread);
-    int storage_server_sock;
-    struct sockaddr_in storage_serv_addr;
-    storage_server_sock = socket(AF_INET, SOCK_STREAM, 0);
-    if (storage_server_sock < 0)
-    {
-        perror("Socket creation failed");
-        exit(EXIT_FAILURE);
-    }
-    storage_serv_addr.sin_family = AF_INET;
-    storage_serv_addr.sin_addr.s_addr = INADDR_ANY;
-    storage_serv_addr.sin_port = htons(PORT+2);
-    int opt = 1;
-    if (setsockopt(storage_server_sock, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)) < 0)
-    {
-        perror("setsockopt failed");
-        exit(EXIT_FAILURE);
-    }
-    if (bind(storage_server_sock, (struct sockaddr *)&storage_serv_addr, sizeof(storage_serv_addr)) < 0)
-    {
-        perror("Bind failed");
-        exit(EXIT_FAILURE);
-    }
-    if (listen(storage_server_sock, 10) < 0)
-    {
-        perror("Listen failed");
-        exit(EXIT_FAILURE);
-    }
-    if (pthread_create(&flushThread, NULL, periodicFlush, NULL) != 0)
-    {
-        perror("Failed to create flush thread");
-        return 1;
-    }
 
-    // Wait for the flush thread to finish (in this case, it runs indefinitely)
-    pthread_detach(flushThread);
-    printf("Storage server is listening for client connections on port %d...\n", PORT+2);
     while (1)
     {
         struct sockaddr_in client_addr;

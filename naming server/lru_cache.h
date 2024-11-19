@@ -22,5 +22,5 @@ LRUCache *createLRUCache(int capacity);
 void freeLRUCache(LRUCache *cache);
 Node *getLRUCache(LRUCache *cache, const char *key);
 void putLRUCache(LRUCache *cache, const char *key, Node *node);
-
+void printCache(LRUCache *cache);
 #endif // LRU_CACHE_H

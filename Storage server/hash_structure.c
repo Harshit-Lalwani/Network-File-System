@@ -31,6 +31,7 @@ Node *createNode(const char *name, NodeType type, Permissions perms, const char 
     node->dataLocation = dataLocation ? strdup(dataLocation) : NULL;
     node->parent = NULL;
     node->next = NULL;
+    node->lock_type=0;
     node->children = (type == DIRECTORY_NODE) ? createNodeTable() : NULL;
     return node;
 }

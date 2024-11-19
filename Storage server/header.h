@@ -9,6 +9,7 @@
 #include <unistd.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <ifaddrs.h>
 #include <time.h>
 #include <linux/limits.h>
 #include <sys/socket.h>
@@ -56,6 +57,7 @@ typedef struct Node
 {
     char *name;      
     NodeType type;
+    int lock_type;
     Permissions permissions;
     char *dataLocation;
     struct Node *parent;
@@ -66,6 +68,9 @@ typedef struct Node
 struct ClientData
 {
     int socket;
+    int client_port;
+    int port;
+    char* ip;
     Node *root;
 };
 
@@ -123,5 +128,7 @@ int copy_directory_recursive(int peer_socket, Node *dir_node, const char *dest_p
 void copy_files_to_peer(const char *source_path, const char *dest_path, const char *peer_ip, int peer_port, Node *root, int naming_socket);
 int copy_single_file(int peer_socket, Node *source_node, const char *dest_path, int naming_socket);
 Node *findNode(Node *root, const char *path);
-void *flushAsyncWrites();
+void *flushAsyncWrites(char *ip);
+void sendAckToNamingServer(const char *status, const char *message, int clientId, const char *fileName, const char *clientIP, int clientPort, char *ip);
+
 #endif

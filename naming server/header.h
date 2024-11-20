@@ -89,8 +89,8 @@ typedef struct StorageServer
     bool active;
     pthread_mutex_t lock;
     struct StorageServer *next; // For collision handling in storage server hash table
-    StorageServer *ss_backup_1;
-    StorageServer *ss_backup_2;
+    struct StorageServer *ss_backup_1;
+    struct StorageServer *ss_backup_2;
 } StorageServer;
 
 // Hash table for storage servers

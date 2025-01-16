@@ -23,3 +23,5 @@ This project entails the development of a simple distributed file system from sc
 3. **Other Features**
    - **Asynchronous and Synchronous Writing [50 Marks]**: Support both asynchronous writes for large data inputs and synchronous priority writes when necessary.
    - **Multiple Clients [70 Marks]**: Ensure concurrent client access to the NM, with initial acknowledgments for received requests.
+  
+Other contributors: Divijh K Mangtani, Mehul Agrawal, Parth Jindal

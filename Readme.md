@@ -2,7 +2,7 @@
 This project entails the development of a simple distributed file system from scratch, allowing students to explore the intricacies of network communication and file management. Participants will implement key components such as clients, a naming server, and storage servers, enabling file operations like reading, writing, and streaming. The project aims to enhance understanding of distributed systems while emphasizing collaborative coding practices through GitHub. Students will learn to manage concurrency and optimize performance, providing a practical foundation in network file systems.
 
 ## Constraints
-Work in teams of 4
+Work in teams of 2
 Use only C language
 
 ## Specs
